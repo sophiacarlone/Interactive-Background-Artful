@@ -10,7 +10,8 @@ using namespace std;
 using namespace cv;
 
 int main(int argc, char** argv) {
-   VideoCapture video_load(0);//capturing video from default camera//
+	//have openCV find best camera
+   VideoCapture video_load(2);//capturing video from default camera//
    double fps = video_load.get(CAP_PROP_FPS); //fps for velocity calculations
    namedWindow("Adjust");//declaring window to show the image//
 
@@ -31,17 +32,21 @@ int main(int argc, char** argv) {
    createTrackbar("HighV", "Adjust", &Val_high, 255);// track - bar for max value//  
    */
 
-   int horizontal_Last = -1;//initial horizontal position//
-   int vertical_Last = -1;//initial vertical position//
+   float horizontal_Last = -1;//initial horizontal position//
+   float vertical_Last = -1;//initial vertical position//
    
    Mat temp;//declaring a matrix to load frames from video stream//
    video_load.read(temp);//loading frames from video stream//
    
    Mat track_motion = Mat::zeros(temp.size(), CV_8UC3);//creating black matrix for detection//
    
+   int camera_size_vertical = temp.rows;
+   int camera_size_horizontal = temp.cols;
+   //cout << camera_size_horizontal << " " << camera_size_vertical << endl;   
+
    Mat sprite = imread("./sprites/1.jpg");
 
-   int posX, posY;
+   float posX, posY;
 
    float velocityX, velocityY;
 
@@ -65,11 +70,12 @@ int main(int argc, char** argv) {
       double tracking_area = detecting_object.m00;//getting area of the object//
 
       if (tracking_area > 10000){ //when area of the object is greater than 10000 pixels//
-         posX = horizontal_moment / tracking_area;//calculate the horizontal position of the object//
-         posY = vertical_moment / tracking_area;//calculate the vertical position of the object//
+         posX = ((horizontal_moment / tracking_area) / camera_size_horizontal) * 2 - 1; //calculate the horizontal position of the object//
+         posY = ((vertical_moment / tracking_area) / camera_size_vertical) * 2 - 1; //calculate the vertical position of the object//
          if (horizontal_Last >= 0 && vertical_Last >= 0 && posX >= 0 && posY >= 0){ //when the detected object moves//
             line(track_motion, Point(posX, posY), Point(horizontal_Last, vertical_Last), Scalar(0, 0, 255), 2);//draw lines of red color on the path of detected object;s motion//
          }
+	//cout << "posx: " << posX << " posy " << posY << endl;
 
          velocityX = (posX - horizontal_Last)/(1/fps);
          velocityY = (posY - vertical_Last)/(1/fps);
@@ -78,12 +84,12 @@ int main(int argc, char** argv) {
          vertical_Last = posY;// getting new vertical position value//
       }
       
-      //imshow("Detected_Object", adjusted_frame);//showing detected object//
+      imshow("Detected_Object", adjusted_frame);//showing detected object//
       actual_Image = actual_Image + track_motion;//drawing continuous line in original video frames//
       imshow("Actual", actual_Image);//showing original video//
       //cout << "position of the object is:" << Horizontal_Last << "," << vertical_Last << endl;//showing tracked co-ordinated values//
       //sprite.copyTo(actual_Image, (cv::Rect(posX,posY,sprite.cols, sprite.rows)));
-      cout << "XVELOCITY: " << velocityX << " YVELOCITY: " << velocityY << endl;
+      //cout << "XVELOCITY: " << velocityX << " YVELOCITY: " << velocityY << endl;
       
       if(waitKey(30)==27){ //if esc is pressed loop will break//
          //cout << "esc key is pressed by user" << endl;
