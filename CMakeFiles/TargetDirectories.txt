@@ -1,3 +1,0 @@
-/home/sophia/Documents/Code/Classes/DA250/Interactive-Background-Artful/CMakeFiles/test.dir
-/home/sophia/Documents/Code/Classes/DA250/Interactive-Background-Artful/CMakeFiles/edit_cache.dir
-/home/sophia/Documents/Code/Classes/DA250/Interactive-Background-Artful/CMakeFiles/rebuild_cache.dir
