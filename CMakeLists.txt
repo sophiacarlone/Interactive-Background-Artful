@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.13)
 project( test )
 add_executable( test main.cpp )
 
@@ -13,8 +13,13 @@ target_link_libraries( test
 )
 
 
+# also compile the shaders
 add_custom_command(
-    OUTPUT shaders/shader.vert shaders/shader.frag
-    COMMAND glslc shaders/shader.vert -o shaders/vert.spv
-    COMMAND glslc shaders/shader.frag -o shaders/frag.spv
+    OUTPUT vert.spv frag.spv
+    COMMAND glslc ${CMAKE_SOURCE_DIR}/shaders/shader.vert -o vert.spv
+    COMMAND glslc ${CMAKE_SOURCE_DIR}/shaders/shader.frag -o frag.spv
 )
+add_custom_target( shaders
+    DEPENDS vert.spv frag.spv
+)
+add_dependencies( test shaders )

@@ -77,8 +77,8 @@ const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
 // shaders
-const char* VERT_SHADER_SPIRV_FILE = "shaders/vert.spv";
-const char* FRAG_SHADER_SPIRV_FILE = "shaders/frag.spv";
+const char* VERT_SHADER_SPIRV_FILE = "vert.spv";
+const char* FRAG_SHADER_SPIRV_FILE = "frag.spv";
 
 // extensions
 const vector<const char*> DEVICE_EXTENSIONS = {
