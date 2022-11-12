@@ -6,7 +6,7 @@ Two main parts, the Graphics Engine and the Object Detection.
 
 Incorporates OpenCV
 
-# Building
+## Building
 
 `cd build`
 
