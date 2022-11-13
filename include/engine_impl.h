@@ -3,6 +3,7 @@
 
 // @todo all this support query shit seems to significantly increase the startup time
 // @todo eventually implement the debug log system starting at page 52 of the Vulkan Tutorial PDF
+// @todo the cleanup function queue thing in vkguide.dev seems a lot nicer than the current system
 
 // glfw
 #define GLFW_INCLUDE_VULKAN // causes GLFW to load the vulkan header
@@ -20,7 +21,7 @@
 // C++ standard library
 #include <iostream>
 #include <stdexcept>
-#include <cstdlib> // EXIT_SUCCESS, EXIT_FAILURE
+#include <cstdlib> // EXIT_SUCCESS, EXIT_FAILURE // @cleanup don't think we need this
 #include <vector>
 #include <cstring> // strcmp
 #include <optional>
@@ -31,9 +32,9 @@
 #include <array>
 #include <functional>
 
-using std::vector, std::cout, std::runtime_error;
-
 namespace engine_impl {
+
+using std::vector, std::cout, std::runtime_error;
 
 // vertex buffer gonna be AoS
 struct Vertex {
@@ -102,6 +103,10 @@ const vector<Vertex> VERTICES = {
     { {-0.1f,  0.1f}, {0.0f, 0.0f, 1.0f} }
 };
 
+// Picked arbitarily; this is the allocated size for the boids uniform buffer.
+// Make sure this matches the size specified in the shaders.
+size_t MAX_N_BOIDS = 1024;
+
 // -----------------------------------------------------------------------------------------------------------
 
 struct AllocatedBuffer {
@@ -130,7 +135,9 @@ struct SwapchainSupportDetails {
 class Engine {
 public:
     void run(std::function<void()> mainLoopCallback);
-    void update_position(glm::vec2 new_pos) { position_ = new_pos; }
+    void update_position(glm::vec2 new_pos) { position_ = new_pos; } // @todo delete or rename?
+    // @todo potential problem: update_boids cannot be run before `run`, since `run` creates the boids UBO
+    void update_boids(const vector<glm::vec2>& positions);
 
 private:
     GLFWwindow* window_;
@@ -149,6 +156,7 @@ private:
     // graphics pipeline stuff
     VkRenderPass renderPass_;
     VkPipelineLayout pipelineLayout_;
+    VkDescriptorSetLayout descriptorSetLayout_;
     VkPipeline graphicsPipeline_;
     vector<VkFramebuffer> swapchainFramebuffers_;
     // command stuff
@@ -164,8 +172,12 @@ private:
     // offsets in it for individual buffers.
     VmaAllocator bufferAllocator_;
     AllocatedBuffer vertexBuffer_;
+    AllocatedBuffer boidPositionsBuffer_; // uniform // @todo destroy in cleanup()
+    VkDescriptorPool descriptorPool_;
+    VkDescriptorSet descriptorSet_;
     // world state (i.e. states of objects in the virtual world)
     glm::vec2 position_;
+    size_t n_boids_; // so we know how many instances to draw
 
     // functions called by run()
     void initWindow();
@@ -187,11 +199,15 @@ private:
     void createSwapchain();
     void createSwapchainImageViews();
     void createRenderPass();
+    void createDescriptorSetLayout();
     void createGraphicsPipeline();
     void createFramebuffers();
     void createCommandPool();
     void createBufferAllocator();
     void createVertexBuffer();
+    void createBoidPositionsBuffer();
+    void createDescriptorPool();
+    void createDescriptorSet();
     void allocateCommandBuffer();
     void createSyncObjects();
     void initWorldState();
@@ -210,6 +226,7 @@ private:
     void recordCommandBuffer(VkCommandBuffer, uint32_t imageIndex);
     void drawFrame();
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+    AllocatedBuffer createBuffer(size_t allocSize, VkBufferUsageFlags, VmaAllocationCreateInfo);
 };
 
 void Engine::run(std::function<void()> mainLoopCallback) {
@@ -217,6 +234,21 @@ void Engine::run(std::function<void()> mainLoopCallback) {
     initVulkan();
     mainLoop(mainLoopCallback);
     cleanup();
+}
+
+void Engine::update_boids(const vector<glm::vec2>& positions) {
+    if (positions.size() > MAX_N_BOIDS) {
+        throw runtime_error("exceeded max number of allowed boids (" + std::to_string(MAX_N_BOIDS) + ")");
+    }
+    n_boids_ = positions.size();
+    
+    // @todo is it better to just leave this memory mapped or something, instead of mapping and unmapping
+    // every update (which is probably every frame)?
+    void* data;
+    vmaMapMemory(bufferAllocator_, boidPositionsBuffer_.allocation, &data);
+    memcpy(data, positions.data(), positions.size() * sizeof(glm::vec2));
+    vmaUnmapMemory(bufferAllocator_, boidPositionsBuffer_.allocation);
+    // no need to flush the write, because using VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 }
 
 void Engine::drawFrame() {
@@ -737,6 +769,29 @@ void Engine::createRenderPass() {
     }
 }
 
+// a descriptor points to a buffer and contains some information about the buffer
+// a descriptor set contains a bunch of descriptors (all of which get bound when the set is bound)
+// @todo more information here
+void Engine::createDescriptorSetLayout() {
+    // A binding is kind of a port in the descriptor set into which descriptors bind (I think).
+    // A binding has a sort of "shape"; different descriptors with a matching "shape" can be bound to it.
+    VkDescriptorSetLayoutBinding layoutBinding{};
+    layoutBinding.binding = 0; // must match binding in shader
+    layoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    layoutBinding.descriptorCount = 1; // this set contains one descriptor
+    layoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT; // going to be accessed by vertex shader
+    layoutBinding.pImmutableSamplers = nullptr; // we're not dealing with samplers for now
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &layoutBinding;
+    // @todo so... what exactly is a descriptor set layout?
+    if (vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &descriptorSetLayout_) != VK_SUCCESS) {
+        throw runtime_error("failed to create descriptor set layout");
+    }
+}
+
 void Engine::createGraphicsPipeline() {
     // read spirv code
     vector<char> vertShaderCode = readSpirvFile(VERT_SHADER_SPIRV_FILE);
@@ -892,8 +947,8 @@ void Engine::createGraphicsPipeline() {
     // pipeline layout (something something descriptors, uniforms, push constants)
     VkPipelineLayoutCreateInfo plLayoutInfo{};
     plLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    plLayoutInfo.setLayoutCount = 0;
-    plLayoutInfo.pSetLayouts = nullptr;
+    plLayoutInfo.setLayoutCount = 1; // descriptor set layouts
+    plLayoutInfo.pSetLayouts = &descriptorSetLayout_;
     plLayoutInfo.pushConstantRangeCount = 1;
     plLayoutInfo.pPushConstantRanges = &pcRange;
 
@@ -1015,8 +1070,7 @@ void Engine::createVertexBuffer() {
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
     // @todo not sure if I need to set these two; Vulkan Tutorial sets them, but isn't using VMA.
     // HOST_COHERENT_BIT makes it so that we don't need to explicitly flush writes to the mapped memory
-    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
     // create the VkBuffer, allocate the VkDeviceMemory, and bind them together
     // these are normally separate steps, but VMA handles all of them in one call
@@ -1038,6 +1092,67 @@ void Engine::createVertexBuffer() {
     // at this point, the driver knows about the writes but the memory may not have been copied to the GPU
     // yet; but Vulkan guarantees it will have been completely copied before the next call to vkQueueSubmit
     // goes through
+}
+
+void Engine::createBoidPositionsBuffer() {
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    // since we're promising sequential writes only, we should only use memcpy to write to it!
+    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+    boidPositionsBuffer_ =
+        createBuffer(MAX_N_BOIDS*sizeof(glm::vec2), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, allocInfo);
+    // @todo initialize? might be fine to just expect the user to do it
+}
+
+void Engine::createDescriptorPool() {
+    VkDescriptorPoolSize poolSize{};
+    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSize.descriptorCount = 1; // @todo if we did double-buffering or something, this would need to change
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.maxSets = 1; // @todo if double-buffering, this should change
+
+    if (vkCreateDescriptorPool(device_, &poolInfo, nullptr, &descriptorPool_) != VK_SUCCESS) {
+        throw runtime_error("failed to create descriptor pool");
+    }
+}
+
+void Engine::createDescriptorSet() {
+    // allocate
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = descriptorPool_;
+    allocInfo.descriptorSetCount = 1; // @todo if double-buffering, this should change
+    allocInfo.pSetLayouts = &descriptorSetLayout_;
+    //
+    if (vkAllocateDescriptorSets(device_, &allocInfo, &descriptorSet_) != VK_SUCCESS) {
+        throw runtime_error("failed to allocate descriptor set");
+    }
+
+    // configure
+    VkDescriptorBufferInfo bufInfo{}; // info for a descriptor describing a buffer
+    bufInfo.buffer = boidPositionsBuffer_.buffer;
+    bufInfo.offset = 0;
+    bufInfo.range = MAX_N_BOIDS * sizeof(glm::vec2);
+    //
+    VkWriteDescriptorSet descWrite{};
+    descWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descWrite.dstSet = descriptorSet_;
+    descWrite.dstBinding = 0; // make sure this matches
+    descWrite.dstArrayElement = 0; // something something descriptors can be arrays but we're not doing that
+    descWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    descWrite.descriptorCount = 1;
+    descWrite.pBufferInfo = &bufInfo;
+    // our desriptor is for a buffer; don't need these two
+    descWrite.pImageInfo = nullptr;
+    descWrite.pTexelBufferView = nullptr;
+    //
+    vkUpdateDescriptorSets(device_, 1, &descWrite, 0, nullptr);
 }
 
 void Engine::allocateCommandBuffer() {
@@ -1086,8 +1201,10 @@ void Engine::recordCommandBuffer(VkCommandBuffer cbuf, uint32_t imageIndex) {
     vkCmdPushConstants(
         cbuf, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(posTransform), &posTransform
     );
-    // instanceCount = 1 because we're not doing instancing
-    vkCmdDraw(cbuf, static_cast<uint32_t>(VERTICES.size()), 1, 0, 0);
+    vkCmdBindDescriptorSets(
+        cbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr
+    );
+    vkCmdDraw(cbuf, static_cast<uint32_t>(VERTICES.size()), n_boids_, 0, 0);
     vkCmdEndRenderPass(cbuf);
 
     if (vkEndCommandBuffer(cbuf) != VK_SUCCESS) throw runtime_error("failed to end command buffer recording");
@@ -1120,6 +1237,7 @@ void Engine::destroySyncObjects() {
 void Engine::initWorldState() {
     // initialize position transform as the identity transform of a 2D point
     position_ = glm::vec2(0.0);
+    n_boids_ = 0;
 }
 
 void Engine::selectPhysicalDevice() {
@@ -1199,6 +1317,25 @@ void Engine::createLogicalDeviceAndQueues() {
     vkGetDeviceQueue(device_, indices.presentFamily.value(),  0, &presentQueue_ );
 }
 
+AllocatedBuffer Engine::createBuffer(
+    size_t allocSize, VkBufferUsageFlags usage, VmaAllocationCreateInfo allocInfo
+) {
+    VkBufferCreateInfo bufInfo{};
+    bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufInfo.pNext = nullptr;
+    bufInfo.size = allocSize;
+    bufInfo.usage = usage;
+
+    AllocatedBuffer buf;
+    if (
+        vmaCreateBuffer(bufferAllocator_, &bufInfo, &allocInfo, &buf.buffer, &buf.allocation, nullptr)
+        != VK_SUCCESS
+    ) throw runtime_error("failed to create buffer");
+
+    return buf;
+}
+
+
 void Engine::initVulkan() {
     createInstance(); cout << "created instance\n";
     // should be after instance, before physical device (can affect phys dev selection)
@@ -1208,11 +1345,15 @@ void Engine::initVulkan() {
     createSwapchain();              cout << "created swapchain\n";
     createSwapchainImageViews();    cout << "created swapchain image views\n";
     createRenderPass();             cout << "created render pass\n";
+    createDescriptorSetLayout();    cout << "created descriptor set layout\n";
     createGraphicsPipeline();       cout << "created graphics pipeline\n";
     createFramebuffers();           cout << "created framebuffers\n";
     createCommandPool();            cout << "created command pool\n";
     createBufferAllocator();        cout << "created buffer allocator\n";
     createVertexBuffer();           cout << "created vertex buffer\n";
+    createBoidPositionsBuffer();    cout << "created boid positions buffer\n";
+    createDescriptorPool();         cout << "created descriptor pool\n";
+    createDescriptorSet();          cout << "created descriptor set\n";
     allocateCommandBuffer();        cout << "allocated command buffer\n";
     createSyncObjects();            cout << "created sync objects\n";
     initWorldState();               cout << "initialized push constants\n";
@@ -1221,12 +1362,15 @@ void Engine::initVulkan() {
 void Engine::cleanup() {
     // destroy things in reverse order of creation
     destroySyncObjects();
+    vkDestroyDescriptorPool(device_, descriptorPool_, nullptr); // also frees descriptor sets
+    vmaDestroyBuffer(bufferAllocator_, boidPositionsBuffer_.buffer, boidPositionsBuffer_.allocation);
     vmaDestroyBuffer(bufferAllocator_, vertexBuffer_.buffer, vertexBuffer_.allocation);
     vmaDestroyAllocator(bufferAllocator_);
     vkDestroyCommandPool(device_, commandPool_, nullptr);
     destroyFramebuffers();
     vkDestroyPipeline(device_, graphicsPipeline_, nullptr);
     vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
+    vkDestroyDescriptorSetLayout(device_, descriptorSetLayout_, nullptr);
     vkDestroyRenderPass(device_, renderPass_, nullptr);
     destroySwapchainImageViews();
     vkDestroySwapchainKHR(device_, swapchain_, nullptr);
