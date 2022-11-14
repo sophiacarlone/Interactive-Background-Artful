@@ -7,11 +7,13 @@
 
 namespace engine {
 
+using engine_impl::Boid;
+
 class Engine {
 public:
     void run(std::function<void()> mainLoopCallback) { engine_.run(mainLoopCallback); }
     void update_position(glm::vec2 new_position) { engine_.update_position(new_position); }
-    void update_boids(const std::vector<glm::vec2>& positions) { engine_.update_boids(positions); }
+    void update_boids(const std::vector<engine_impl::Boid>& positions) { engine_.update_boids(positions); }
 
 private:
     engine_impl::Engine engine_;

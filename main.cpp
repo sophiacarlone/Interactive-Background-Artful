@@ -1,19 +1,25 @@
-#include <glm/glm.hpp>
 #include "include/engine.h"
 
-using glm::vec2;
 using std::vector;
+using engine::Boid;
 
 int main() {
-    // @todo ??? doesn't draw every second boid
-    vector<vec2> boid_positions = {
-        vec2(0.0f,  0.0f),
-        vec2(0.3f,  0.0f),
-        vec2(0.5f, -0.3f),
+    // even ones on the left, odd ones on the right
+    vector<Boid> boids = {
+        Boid { {-0.5f, -0.5f} },
+        Boid { { 0.5f, -0.5f} },
+        Boid { {-0.5f, -0.4f} },
+        Boid { { 0.5f, -0.4f} },
+        Boid { {-0.5f, -0.3f} },
+        Boid { { 0.5f, -0.3f} },
+        Boid { {-0.5f, -0.2f} },
+        Boid { { 0.5f, -0.2f} },
+        Boid { {-0.5f, -0.1f} },
+        Boid { { 0.5f, -0.1f} },
     };
 
     engine::Engine eng;
     eng.run([&](){
-        eng.update_boids(boid_positions);
+        eng.update_boids(boids);
     });
 }

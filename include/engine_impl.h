@@ -71,6 +71,12 @@ struct Vertex {
     }
 };
 
+struct Boid {
+    // Aligning to 16 bytes because ran into issues with compiled shader using 16-byte strides and ignoring
+    // every other vec2.
+    alignas(16) glm::vec2 pos;
+};
+
 // CONSTANTS -------------------------------------------------------------------------------------------------
 
 // window dimensions
@@ -137,7 +143,7 @@ public:
     void run(std::function<void()> mainLoopCallback);
     void update_position(glm::vec2 new_pos) { position_ = new_pos; } // @todo delete or rename?
     // @todo potential problem: update_boids cannot be run before `run`, since `run` creates the boids UBO
-    void update_boids(const vector<glm::vec2>& positions);
+    void update_boids(const vector<Boid>& positions);
 
 private:
     GLFWwindow* window_;
@@ -236,7 +242,7 @@ void Engine::run(std::function<void()> mainLoopCallback) {
     cleanup();
 }
 
-void Engine::update_boids(const vector<glm::vec2>& positions) {
+void Engine::update_boids(const vector<Boid>& positions) {
     if (positions.size() > MAX_N_BOIDS) {
         throw runtime_error("exceeded max number of allowed boids (" + std::to_string(MAX_N_BOIDS) + ")");
     }
@@ -246,7 +252,7 @@ void Engine::update_boids(const vector<glm::vec2>& positions) {
     // every update (which is probably every frame)?
     void* data;
     vmaMapMemory(bufferAllocator_, boidPositionsBuffer_.allocation, &data);
-    memcpy(data, positions.data(), positions.size() * sizeof(glm::vec2));
+    memcpy(data, positions.data(), positions.size() * sizeof(Boid));
     vmaUnmapMemory(bufferAllocator_, boidPositionsBuffer_.allocation);
     // no need to flush the write, because using VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 }
@@ -880,7 +886,8 @@ void Engine::createGraphicsPipeline() {
     rastInfo.polygonMode = VK_POLYGON_MODE_FILL; // fill polygons / only draw edges / only draw vertices
     rastInfo.lineWidth = 1.0f; // width of lines (measured in number of fragments (i.e. "pixels"))
     // whether to cull "front-facing" or "back-facing" faces, or none at all
-    rastInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+    // rastInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+    rastInfo.cullMode = VK_CULL_MODE_NONE; // @debug
     // defines direction a face "faces" by the order of vertices defining the polygon
     rastInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
     rastInfo.depthBiasEnable = VK_FALSE; // whether to modify depth values during rasterization
@@ -1102,7 +1109,7 @@ void Engine::createBoidPositionsBuffer() {
     allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
     boidPositionsBuffer_ =
-        createBuffer(MAX_N_BOIDS*sizeof(glm::vec2), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, allocInfo);
+        createBuffer(MAX_N_BOIDS*sizeof(Boid), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, allocInfo);
     // @todo initialize? might be fine to just expect the user to do it
 }
 
@@ -1138,7 +1145,7 @@ void Engine::createDescriptorSet() {
     VkDescriptorBufferInfo bufInfo{}; // info for a descriptor describing a buffer
     bufInfo.buffer = boidPositionsBuffer_.buffer;
     bufInfo.offset = 0;
-    bufInfo.range = MAX_N_BOIDS * sizeof(glm::vec2);
+    bufInfo.range = MAX_N_BOIDS * sizeof(Boid);
     //
     VkWriteDescriptorSet descWrite{};
     descWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
