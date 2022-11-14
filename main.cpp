@@ -14,6 +14,7 @@ using namespace cv;
 const bool DETECT_OBJECT = false;
 
 int main(int argc, char** argv) {
+   // @todo organize the computer vision stuff into a separate object or something
     int vidnum;
     cout << "Camera number: ";
     cin >> vidnum;
@@ -67,17 +68,7 @@ int main(int argc, char** argv) {
 
    engine::Engine engine;
 
-   engine.run([
-      &engine,
-      &posX, &posY, &velocityX, &velocityY,
-      &temp,
-      &horizontal_Last, &vertical_Last,
-      &camera_size_vertical, &camera_size_horizontal,
-      &fps,
-      &video_load,
-      &Hue_Low, &Hue_high, &Sat_Low, &Sat_high, &Val_Low, &Val_high,
-      &track_motion
-   ] () {
+   engine.run([&] () {
       Mat actual_Image;//declaring a matrix for actual image//
       bool temp_load = video_load.read(actual_Image);//loading frames from video to the matrix//
       flip(actual_Image, actual_Image, 1); // mirror so it's more intuitive for user
@@ -105,7 +96,7 @@ int main(int argc, char** argv) {
          // if (horizontal_Last >= 0 && vertical_Last >= 0 && posX >= 0 && posY >= 0){ //when the detected object moves//
          //    line(track_motion, Point(posX, posY), Point(horizontal_Last, vertical_Last), Scalar(0, 0, 255), 2);//draw lines of red color on the path of detected object;s motion//
          // }
-	//cout << "posx: " << posX << " posy " << posY << endl;
+      //cout << "posx: " << posX << " posy " << posY << endl;
 
          velocityX = (posX - horizontal_Last)/(1./fps);
          velocityY = (posY - vertical_Last)/(1./fps);
@@ -123,6 +114,7 @@ int main(int argc, char** argv) {
       //sprite.copyTo(actual_Image, (cv::Rect(posX,posY,sprite.cols, sprite.rows)));
       //cout << "XVELOCITY: " << velocityX << " YVELOCITY: " << velocityY << endl;
       
+      // @todo why are we waiting so long? this might significantly affect framerate
       if(waitKey(30)==27){ //if esc is pressed loop will break//
          //cout << "esc key is pressed by user" << endl;
          exit(0); // @todo replace with `engine.stop()` or something
