@@ -18,6 +18,7 @@ add_custom_command(
     OUTPUT vert.spv frag.spv
     COMMAND glslc ${CMAKE_SOURCE_DIR}/shaders/shader.vert -o vert.spv
     COMMAND glslc ${CMAKE_SOURCE_DIR}/shaders/shader.frag -o frag.spv
+    DEPENDS shaders/shader.vert shaders/shader.frag
 )
 add_custom_target( shaders
     DEPENDS vert.spv frag.spv
