@@ -21,7 +21,6 @@
 // C++ standard library
 #include <iostream>
 #include <stdexcept>
-#include <cstdlib> // EXIT_SUCCESS, EXIT_FAILURE // @cleanup don't think we need this
 #include <vector>
 #include <cstring> // strcmp
 #include <optional>
@@ -35,11 +34,12 @@
 namespace engine_impl {
 
 using std::vector, std::cout, std::runtime_error;
+using glm::vec2, glm::vec3;
 
 // vertex buffer gonna be AoS
 struct Vertex {
-    glm::vec2 pos;
-    glm::vec3 color;
+    vec2 pos;
+    vec3 color;
 
     // @todo ... what's a binding?
     static VkVertexInputBindingDescription getBindingDescription() {
@@ -74,7 +74,7 @@ struct Vertex {
 struct Boid {
     // Aligning to 16 bytes because ran into issues with compiled shader using 16-byte strides and ignoring
     // every other vec2.
-    alignas(16) glm::vec2 pos;
+    alignas(16) vec2 pos;
 };
 
 // CONSTANTS -------------------------------------------------------------------------------------------------
@@ -141,7 +141,7 @@ struct SwapchainSupportDetails {
 class Engine {
 public:
     void run(std::function<void()> mainLoopCallback);
-    void update_position(glm::vec2 new_pos) { position_ = new_pos; } // @todo delete or rename?
+    void update_position(vec2 new_pos) { position_ = new_pos; } // @todo delete or rename?
     // @todo potential problem: update_boids cannot be run before `run`, since `run` creates the boids UBO
     void update_boids(const vector<Boid>& positions);
 
@@ -182,7 +182,7 @@ private:
     VkDescriptorPool descriptorPool_;
     VkDescriptorSet descriptorSet_;
     // world state (i.e. states of objects in the virtual world)
-    glm::vec2 position_;
+    vec2 position_;
     size_t n_boids_; // so we know how many instances to draw
 
     // functions called by run()
@@ -1204,7 +1204,7 @@ void Engine::recordCommandBuffer(VkCommandBuffer cbuf, uint32_t imageIndex) {
     VkBuffer vertexBuffers[] = {vertexBuffer_.buffer};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cbuf, 0, 1, vertexBuffers, offsets);
-    glm::mat4 posTransform = glm::translate(glm::identity<glm::mat4>(), glm::vec3(position_, 0.0));
+    glm::mat4 posTransform = glm::translate(glm::identity<glm::mat4>(), vec3(position_, 0.0));
     vkCmdPushConstants(
         cbuf, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(posTransform), &posTransform
     );
@@ -1243,7 +1243,7 @@ void Engine::destroySyncObjects() {
 
 void Engine::initWorldState() {
     // initialize position transform as the identity transform of a 2D point
-    position_ = glm::vec2(0.0);
+    position_ = vec2(0.0);
     n_boids_ = 0;
 }
 
