@@ -71,17 +71,19 @@ struct Vertex {
     }
 };
 
+// alignas qualifiers are to ensure data is aligned the way the shader expects it to be
 struct Boid {
-    // Aligning to 16 bytes because ran into issues with compiled shader using 16-byte strides and ignoring
-    // every other vec2.
-    alignas(16) vec2 pos;
+    alignas(8) vec2 pos;
+    alignas(8) vec2 vel;
 };
 
 // CONSTANTS -------------------------------------------------------------------------------------------------
 
 // window dimensions
-const uint32_t WIDTH = 800;
-const uint32_t HEIGHT = 600;
+// @todo square because shit gets stretched out when rectangular. Gotta figure out how to do viewport stuff or
+// something.
+const uint32_t WIDTH  = 800;
+const uint32_t HEIGHT = 800;
 
 // shaders
 const char* VERT_SHADER_SPIRV_FILE = "vert.spv";
@@ -104,9 +106,9 @@ const vector<const char*> VALIDATION_LAYERS = {
 
 // vertices
 const vector<Vertex> VERTICES = {
-    { { 0.0f, -0.1f}, {1.0f, 0.0f, 0.0f} },
-    { { 0.1f,  0.1f}, {0.0f, 1.0f, 0.0f} },
-    { {-0.1f,  0.1f}, {0.0f, 0.0f, 1.0f} }
+    { {-0.1f,  0.00f}, {1.0f, 0.0f, 0.0f} },
+    { { 0.1f,  0.05f}, {0.0f, 1.0f, 0.0f} },
+    { { 0.1f, -0.05f}, {0.0f, 0.0f, 1.0f} }
 };
 
 // Picked arbitarily; this is the allocated size for the boids uniform buffer.
