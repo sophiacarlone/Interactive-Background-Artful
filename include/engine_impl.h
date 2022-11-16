@@ -106,9 +106,9 @@ const vector<const char*> VALIDATION_LAYERS = {
 
 // vertices
 const vector<Vertex> VERTICES = {
-    { {-0.1f,  0.00f}, {1.0f, 0.0f, 0.0f} },
-    { { 0.1f,  0.05f}, {0.0f, 1.0f, 0.0f} },
-    { { 0.1f, -0.05f}, {0.0f, 0.0f, 1.0f} }
+    { { 0.02f,  0.000f}, {1.0f, 0.0f, 0.0f} },
+    { {-0.02f,  0.010f}, {0.0f, 1.0f, 0.0f} },
+    { {-0.02f, -0.010f}, {0.0f, 0.0f, 1.0f} }
 };
 
 // Picked arbitarily; this is the allocated size for the boids uniform buffer.
@@ -145,7 +145,7 @@ public:
     void run(std::function<void()> mainLoopCallback);
     void update_position(vec2 new_pos) { position_ = new_pos; } // @todo delete or rename?
     // @todo potential problem: update_boids cannot be run before `run`, since `run` creates the boids UBO
-    void update_boids(const vector<Boid>& positions);
+    void update_boids(const vector<Boid>& boids);
 
 private:
     GLFWwindow* window_;
@@ -244,17 +244,17 @@ void Engine::run(std::function<void()> mainLoopCallback) {
     cleanup();
 }
 
-void Engine::update_boids(const vector<Boid>& positions) {
-    if (positions.size() > MAX_N_BOIDS) {
+void Engine::update_boids(const vector<Boid>& boids) {
+    if (boids.size() > MAX_N_BOIDS) {
         throw runtime_error("exceeded max number of allowed boids (" + std::to_string(MAX_N_BOIDS) + ")");
     }
-    n_boids_ = positions.size();
+    n_boids_ = boids.size();
     
     // @todo is it better to just leave this memory mapped or something, instead of mapping and unmapping
     // every update (which is probably every frame)?
     void* data;
     vmaMapMemory(bufferAllocator_, boidPositionsBuffer_.allocation, &data);
-    memcpy(data, positions.data(), positions.size() * sizeof(Boid));
+    memcpy(data, boids.data(), boids.size() * sizeof(Boid));
     vmaUnmapMemory(bufferAllocator_, boidPositionsBuffer_.allocation);
     // no need to flush the write, because using VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 }
