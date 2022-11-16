@@ -4,7 +4,7 @@
 using std::vector;
 using engine::Boid, engine::vec2;
 
-const size_t N_BOIDS = 10;
+const size_t N_BOIDS = 30;
 
 class Boids {
 public:
@@ -29,8 +29,8 @@ private:
     static constexpr float SPEED_CAP = 1.0;
     static constexpr float DT = 0.01; // time step
     // weight factors; modify to increase or decrease priority of different factors
-    static constexpr float WEIGHT_SEPARATION = 1.0;
-    static constexpr float WEIGHT_COHESION   = 1.0;
+    static constexpr float WEIGHT_SEPARATION = 0.1;
+    static constexpr float WEIGHT_COHESION   = 0.5;
     static constexpr float WEIGHT_ALIGNMENT  = 1.0;
 };
 
@@ -50,7 +50,7 @@ Boids::Boids(size_t n_boids) {
     // initialize the `current` boids vector
     for (Boid& boid : *boids_current_) {
         boid.pos = vec2(rng(generator), rng(generator));
-        boid.vel = vec2(0.0, 0.0);
+        boid.vel = vec2(SPEED_CAP, SPEED_CAP);
     }
     // We don't need to initialize the `new` vector, since:
     // 1. it isn't used for anything until we first compute the new boids_ data
@@ -85,6 +85,7 @@ void Boids::update_boids() {
 
         // Compute acceleration due to separation
         vec2 acc_separation(0.0);
+        // avoid other boids
         for (size_t j = 0; j < boids_current_->size(); ++j) {
             if (i == j) continue; // the boid shouldn't try to separate from itself
             const Boid& other_boid = (*boids_current_)[j];
@@ -114,6 +115,13 @@ void Boids::update_boids() {
         if (speed > SPEED_CAP) new_boid.vel *= SPEED_CAP / speed; // enforce speed limit
         // compute position
         new_boid.pos = boid.pos + DT * new_boid.vel;
+        // wrap around if hit window border
+        // @todo disable this once we have the "follow the tracked object" rule; just let them leave the
+        // border, since they'll come back anyway.
+        if (new_boid.pos.x < -1.0) new_boid.pos.x += 2;
+        else if (new_boid.pos.x > 1.0) new_boid.pos.x -= 2;
+        if (new_boid.pos.y < -1.0) new_boid.pos.y += 2;
+        else if (new_boid.pos.y > 1.0) new_boid.pos.y -= 2;
     }
 
     // update pointers to reflect which vector has the current boid data
