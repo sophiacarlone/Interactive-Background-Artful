@@ -9,7 +9,7 @@ const size_t N_BOIDS = 30;
 class Boids {
 public:
     Boids(size_t n);
-    void update_boids();
+    void update_boids(vec2 attractor_pos);
     vector<Boid>* vec() { return boids_current_; }
 
 private:
@@ -29,9 +29,10 @@ private:
     static constexpr float SPEED_CAP = 1.0;
     static constexpr float DT = 0.01; // time step
     // weight factors; modify to increase or decrease priority of different factors
-    static constexpr float WEIGHT_SEPARATION = 0.1;
+    static constexpr float WEIGHT_SEPARATION = 0.02;
     static constexpr float WEIGHT_COHESION   = 0.5;
     static constexpr float WEIGHT_ALIGNMENT  = 1.0;
+    static constexpr float WEIGHT_ATTRACTION = 1.0;
 };
 
 Boids::Boids(size_t n_boids) {
@@ -57,7 +58,7 @@ Boids::Boids(size_t n_boids) {
     // 2. its values will be overwritten when we first compute the new boids_ data
 }
 
-void Boids::update_boids() {
+void Boids::update_boids(vec2 attractor_pos) {
     size_t n_boids = boids_current_->size();
     float reciprocal_n_other_boids = 1.0 / (float)(n_boids - 1);
 
@@ -102,13 +103,18 @@ void Boids::update_boids() {
             }
         }
 
+        // Compute acceleration due to attraction to object (e.g. the object is bread and the birds want it)
+        // @todo not sure why I decided to normalize, but it looks cool and reduces overshooting severity
+        vec2 acc_attraction = glm::normalize(attractor_pos - boid.pos);
+
         // write the new values to `boids_new_`
         Boid& new_boid = (*boids_new_)[i];
         // compute net acceleration
         vec2 net_acc =
             WEIGHT_COHESION   * acc_cohesion +
             WEIGHT_SEPARATION * acc_separation +
-            WEIGHT_ALIGNMENT  * acc_alignment;
+            WEIGHT_ALIGNMENT  * acc_alignment +
+            WEIGHT_ATTRACTION * acc_attraction;
         // compute velocity
         new_boid.vel = boid.vel + DT * net_acc;
         float speed = length(new_boid.vel);
@@ -130,10 +136,11 @@ void Boids::update_boids() {
 
 int main() {
     Boids boids(N_BOIDS);
+    vec2 attractor_pos(0.0);
 
     engine::Engine eng;
     eng.run([&](){
-        boids.update_boids();
+        boids.update_boids(attractor_pos);
         // for (Boid& b : *boids.vec()) std::cout << b.pos.x << ',' << b.pos.y << ' ' << b.vel.x << ',' << b.vel.y << " ; ";
         // std::cout << '\n';
         eng.update_boids(*boids.vec());

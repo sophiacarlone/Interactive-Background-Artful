@@ -1,6 +1,8 @@
 #ifndef ENGINE_IMPL_H
 #define ENGINE_IMPL_H
 
+// @todo draw the attractor on screen. Do we need a separate command buffer and vertex shader for that?
+//     We should just make the current vertex shader more generic. Not sure about command buffer though
 // @todo all this support query shit seems to significantly increase the startup time
 // @todo eventually implement the debug log system starting at page 52 of the Vulkan Tutorial PDF
 // @todo the cleanup function queue thing in vkguide.dev seems a lot nicer than the current system
@@ -105,10 +107,15 @@ const vector<const char*> VALIDATION_LAYERS = {
 #endif
 
 // vertices
-const vector<Vertex> VERTICES = {
+const vector<Vertex> BOID_VERTS = {
     { { 0.02f,  0.000f}, {1.0f, 0.0f, 0.0f} },
     { {-0.02f,  0.010f}, {0.0f, 1.0f, 0.0f} },
     { {-0.02f, -0.010f}, {0.0f, 0.0f, 1.0f} }
+};
+const vector<Vertex> ATTRACTOR_VERTS = {
+    { { 0.000f,  0.050f}, {1.0f, 0.0f, 0.0f} },
+    { { 0.025f, -0.043f}, {0.0f, 1.0f, 0.0f} },
+    { {-0.025f, -0.043f}, {0.0f, 0.0f, 1.0f} }
 };
 
 // Picked arbitarily; this is the allocated size for the boids uniform buffer.
@@ -143,7 +150,7 @@ struct SwapchainSupportDetails {
 class Engine {
 public:
     void run(std::function<void()> mainLoopCallback);
-    void update_position(vec2 new_pos) { position_ = new_pos; } // @todo delete or rename?
+    void update_attractor(vec2 new_pos) { attractor_position = new_pos; }
     // @todo potential problem: update_boids cannot be run before `run`, since `run` creates the boids UBO
     void update_boids(const vector<Boid>& boids);
 
@@ -179,12 +186,13 @@ private:
     // then use it for all allocation calls. It does things like keeping one big VkBufferMemory and using
     // offsets in it for individual buffers.
     VmaAllocator bufferAllocator_;
-    AllocatedBuffer vertexBuffer_;
-    AllocatedBuffer boidPositionsBuffer_; // uniform // @todo destroy in cleanup()
+    AllocatedBuffer boidVertBuffer_;
+    AllocatedBuffer attractorVertBuffer_;
+    AllocatedBuffer boidPositionsBuffer_;
     VkDescriptorPool descriptorPool_;
     VkDescriptorSet descriptorSet_;
     // world state (i.e. states of objects in the virtual world)
-    vec2 position_;
+    vec2 attractor_position; // the thing attracting the boids
     size_t n_boids_; // so we know how many instances to draw
 
     // functions called by run()
@@ -212,7 +220,7 @@ private:
     void createFramebuffers();
     void createCommandPool();
     void createBufferAllocator();
-    void createVertexBuffer();
+    void createVertexBuffers();
     void createBoidPositionsBuffer();
     void createDescriptorPool();
     void createDescriptorSet();
@@ -1064,43 +1072,41 @@ void Engine::createBufferAllocator() {
     }
 }
 
-void Engine::createVertexBuffer() {
-    // buffer info
-    VkBufferCreateInfo bufInfo{};
-    bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufInfo.size = sizeof(VERTICES[0]) * VERTICES.size();
-    bufInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE; // only used by graphics queue
-
-    // allocation info
+void Engine::createVertexBuffers() {
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-    // we'll be using memcpy to write to the buffer, so SEQUENTIAL_WRITE_BIT is appropriate
-    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-    // @todo not sure if I need to set these two; Vulkan Tutorial sets them, but isn't using VMA.
+    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT; // we'll use memcpy
     // HOST_COHERENT_BIT makes it so that we don't need to explicitly flush writes to the mapped memory
     allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-    // create the VkBuffer, allocate the VkDeviceMemory, and bind them together
-    // these are normally separate steps, but VMA handles all of them in one call
-    if (
-        vmaCreateBuffer(
-            bufferAllocator_, &bufInfo, &allocInfo, &vertexBuffer_.buffer, &vertexBuffer_.allocation, nullptr
-        ) != VK_SUCCESS
-    ) throw runtime_error("allocator failed to allocate and bind vertex buffer");
-
+    // create boids vertex buffer
+    // @todo this doesn't set the sharing mode; setting it to EXCLUSIVE should be optimal
+    boidVertBuffer_ = createBuffer(
+        sizeof(Vertex) * BOID_VERTS.size(), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, allocInfo
+    );
     // copy vertices over to buffer
-    void* data; // becomes a pointer to the mapped memory
-    if (vmaMapMemory(bufferAllocator_, vertexBuffer_.allocation, &data) != VK_SUCCESS) {
-        throw runtime_error("failed to map vertex buffer memory");
+    void* mappedBoidVertBuf; // becomes a pointer to the mapped memory
+    if (vmaMapMemory(bufferAllocator_, boidVertBuffer_.allocation, &mappedBoidVertBuf) != VK_SUCCESS) {
+        throw runtime_error("failed to map boids buffer memory");
     }
-    memcpy(data, VERTICES.data(), bufInfo.size);
+    memcpy(mappedBoidVertBuf, BOID_VERTS.data(), sizeof(Vertex) * BOID_VERTS.size());
     // don't need to explicitly flush writes to the memory here as long as we have set
     // VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    vmaUnmapMemory(bufferAllocator_, vertexBuffer_.allocation);
+    vmaUnmapMemory(bufferAllocator_, boidVertBuffer_.allocation);
     // at this point, the driver knows about the writes but the memory may not have been copied to the GPU
     // yet; but Vulkan guarantees it will have been completely copied before the next call to vkQueueSubmit
     // goes through
+
+    // same for attractor vertex buffer
+    attractorVertBuffer_ = createBuffer(
+        sizeof(Vertex) * ATTRACTOR_VERTS.size(), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, allocInfo
+    );
+    void* mappedAttraVertBuf;
+    if (vmaMapMemory(bufferAllocator_, attractorVertBuffer_.allocation, &mappedAttraVertBuf) != VK_SUCCESS) {
+        throw runtime_error("failed to map attractor buffer memory");
+    }
+    memcpy(mappedAttraVertBuf, ATTRACTOR_VERTS.data(), sizeof(Vertex) * ATTRACTOR_VERTS.size());
+    vmaUnmapMemory(bufferAllocator_, attractorVertBuffer_.allocation);
 }
 
 void Engine::createBoidPositionsBuffer() {
@@ -1203,17 +1209,17 @@ void Engine::recordCommandBuffer(VkCommandBuffer cbuf, uint32_t imageIndex) {
     vkCmdBeginRenderPass(cbuf, &rpbInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(cbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline_);
     // bind vertex buffer
-    VkBuffer vertexBuffers[] = {vertexBuffer_.buffer};
+    VkBuffer vertexBuffers[] = {boidVertBuffer_.buffer};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cbuf, 0, 1, vertexBuffers, offsets);
-    glm::mat4 posTransform = glm::translate(glm::identity<glm::mat4>(), vec3(position_, 0.0));
+    glm::mat4 posTransform = glm::translate(glm::identity<glm::mat4>(), vec3(attractor_position, 0.0));
     vkCmdPushConstants(
         cbuf, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(posTransform), &posTransform
     );
     vkCmdBindDescriptorSets(
         cbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr
     );
-    vkCmdDraw(cbuf, static_cast<uint32_t>(VERTICES.size()), n_boids_, 0, 0);
+    vkCmdDraw(cbuf, static_cast<uint32_t>(BOID_VERTS.size()), n_boids_, 0, 0);
     vkCmdEndRenderPass(cbuf);
 
     if (vkEndCommandBuffer(cbuf) != VK_SUCCESS) throw runtime_error("failed to end command buffer recording");
@@ -1245,7 +1251,7 @@ void Engine::destroySyncObjects() {
 
 void Engine::initWorldState() {
     // initialize position transform as the identity transform of a 2D point
-    position_ = vec2(0.0);
+    attractor_position = vec2(0.0);
     n_boids_ = 0;
 }
 
@@ -1334,6 +1340,7 @@ AllocatedBuffer Engine::createBuffer(
     bufInfo.pNext = nullptr;
     bufInfo.size = allocSize;
     bufInfo.usage = usage;
+    // @todo sharing mode?
 
     AllocatedBuffer buf;
     if (
@@ -1359,7 +1366,7 @@ void Engine::initVulkan() {
     createFramebuffers();           cout << "created framebuffers\n";
     createCommandPool();            cout << "created command pool\n";
     createBufferAllocator();        cout << "created buffer allocator\n";
-    createVertexBuffer();           cout << "created vertex buffer\n";
+    createVertexBuffers();          cout << "created vertex buffer\n";
     createBoidPositionsBuffer();    cout << "created boid positions buffer\n";
     createDescriptorPool();         cout << "created descriptor pool\n";
     createDescriptorSet();          cout << "created descriptor set\n";
@@ -1373,7 +1380,8 @@ void Engine::cleanup() {
     destroySyncObjects();
     vkDestroyDescriptorPool(device_, descriptorPool_, nullptr); // also frees descriptor sets
     vmaDestroyBuffer(bufferAllocator_, boidPositionsBuffer_.buffer, boidPositionsBuffer_.allocation);
-    vmaDestroyBuffer(bufferAllocator_, vertexBuffer_.buffer, vertexBuffer_.allocation);
+    vmaDestroyBuffer(bufferAllocator_, attractorVertBuffer_.buffer, attractorVertBuffer_.allocation);
+    vmaDestroyBuffer(bufferAllocator_, boidVertBuffer_.buffer, boidVertBuffer_.allocation);
     vmaDestroyAllocator(bufferAllocator_);
     vkDestroyCommandPool(device_, commandPool_, nullptr);
     destroyFramebuffers();
