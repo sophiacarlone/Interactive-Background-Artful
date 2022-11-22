@@ -18,9 +18,10 @@ add_custom_command(
     OUTPUT vert.spv frag.spv
     COMMAND glslc ${CMAKE_SOURCE_DIR}/shaders/shader.vert -o vert.spv
     COMMAND glslc ${CMAKE_SOURCE_DIR}/shaders/shader.frag -o frag.spv
-    DEPENDS shaders/shader.vert shaders/shader.frag
+    COMMAND glslc ${CMAKE_SOURCE_DIR}/shaders/shader.comp -o comp.spv
+    DEPENDS shaders/shader.vert shaders/shader.frag shaders/shader.comp
 )
 add_custom_target( shaders
-    DEPENDS vert.spv frag.spv
+    DEPENDS vert.spv frag.spv comp.spv
 )
 add_dependencies( test shaders )

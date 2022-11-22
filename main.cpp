@@ -139,10 +139,12 @@ int main() {
     vec2 attractor_pos(0.0);
 
     engine::Engine eng;
+    // @todo engine needs a way to initialize boids before calling run(). The following is a placeholder hack.
+    bool first_iter = true;
     eng.run([&](){
-        boids.update_boids(attractor_pos);
-        // for (Boid& b : *boids.vec()) std::cout << b.pos.x << ',' << b.pos.y << ' ' << b.vel.x << ',' << b.vel.y << " ; ";
-        // std::cout << '\n';
-        eng.update_boids(*boids.vec());
+        if (first_iter) {
+            eng.update_boids(*boids.vec());
+            first_iter = false;
+        }
     });
 }

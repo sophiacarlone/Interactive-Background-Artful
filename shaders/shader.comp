@@ -1,0 +1,29 @@
+#version 450
+
+// There's no `location` for `in`; it's just used to specify the local workgroup dimensions.
+// @todo local workgroup size chosen arbitrarily; choose it properly (maybe programmatically determine on host
+// and pass in via... a specialization constant or something?)
+layout(local_size_x = 32) in;
+
+struct Boid {
+    vec2 pos;
+    vec2 vel;
+};
+
+// the boids buffer
+// @continue @todo you can't modify uniform buffers from shaders. You probably want a storage buffer.
+layout(binding = 0, std140) uniform Boids {
+    Boid boids[1024];
+};
+layout(push_constant) uniform PushConsts {
+    uint nBoids;
+} pushConsts;
+
+void main() {
+    uint boidInd = gl_GlobalInvocationID.x;
+    // if you don't have a boid to update, return immediately
+    if (boidInd >= pushConsts.nBoids) return;
+
+    // placeholder computation; I need to sleep
+    boids[boidInd].pos += vec2(0.01);
+}
