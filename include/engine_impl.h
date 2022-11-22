@@ -1,11 +1,6 @@
 #ifndef ENGINE_IMPL_H
 #define ENGINE_IMPL_H
 
-// @continue need:
-//     compute shader
-//     command buffer for compute queue
-//     sync so compute shader finishes writing before vertex shader starts
-
 // @todo draw the attractor on screen. Do we need a separate command buffer and vertex shader for that?
 //     We should just make the current vertex shader more generic. Not sure about command buffer though
 // @todo all this support query shit seems to significantly increase the startup time
@@ -189,13 +184,13 @@ private:
     VkPipeline graphicsPipeline_;
     vector<VkFramebuffer> swapchainFramebuffers_;
     // compute pipeline stuff
-    VkPipelineLayout computePipelineLayout_; // @todo destroy in cleanup?
-    VkPipeline computePipeline_; // @todo destroy in cleanup
+    VkPipelineLayout computePipelineLayout_;
+    VkPipeline computePipeline_;
     // command stuff
     VkCommandPool graphicsCmdPool_; // a command pool manages memory for command buffers
     VkCommandBuffer graphicsCmdBuf_; // a command buffer containing commands is submitted to a device queue
-    VkCommandPool computeCmdPool_; // @todo destroy in cleanup
-    VkCommandBuffer computeCmdBuf_; // @todo destroy in cleanup?
+    VkCommandPool computeCmdPool_;
+    VkCommandBuffer computeCmdBuf_;
     // syncronization
     VkSemaphore imageAvailableSemaphore_;
     VkSemaphore renderFinishedSemaphore_;
@@ -253,6 +248,7 @@ private:
     void destroySwapchainImageViews();
     void destroyFramebuffers();
     void destroySyncObjects();
+    void destroyCommandPools();
 
     // choosing swapchain settings
     // chooseSwapSurfaceFormat and chooseSwapPresentMode are standalone functions
@@ -337,8 +333,12 @@ void Engine::drawFrame() {
     compSubmitInfo.pSignalSemaphores = &computeFinishedSemaphore_;
     compSubmitInfo.commandBufferCount = 1;
     compSubmitInfo.pCommandBuffers = &computeCmdBuf_;
+    //
+    if (vkQueueSubmit(computeQueue_, 1, &compSubmitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
+        throw runtime_error("failed to submit draw command buffer");
+    }
 
-    // submit command buffer to queue
+    // submit graphics command buffer
     VkSubmitInfo graphicsSubmitInfo{};
     graphicsSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     // Don't run the vertex shader until the compute shader finished writing the boids data to the uniform.
@@ -348,7 +348,7 @@ void Engine::drawFrame() {
         VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, // I think this is right?
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
     };
-    graphicsSubmitInfo.waitSemaphoreCount = 1;
+    graphicsSubmitInfo.waitSemaphoreCount = 2;
     graphicsSubmitInfo.pWaitSemaphores = waitSemaphores;
     graphicsSubmitInfo.pWaitDstStageMask = waitStages;
     // cmd bufs to submit
@@ -358,7 +358,7 @@ void Engine::drawFrame() {
     VkSemaphore signalSemaphores[] = {renderFinishedSemaphore_};
     graphicsSubmitInfo.signalSemaphoreCount = 1;
     graphicsSubmitInfo.pSignalSemaphores = signalSemaphores;
-
+    //
     if (vkQueueSubmit(graphicsQueue_, 1, &graphicsSubmitInfo, inFlightFence_) != VK_SUCCESS) {
         throw runtime_error("failed to submit draw command buffer");
     }
@@ -840,7 +840,7 @@ void Engine::createDescriptorSetLayout() {
     // A binding has a sort of "shape"; different descriptors with a matching "shape" can be bound to it.
     VkDescriptorSetLayoutBinding layoutBinding{};
     layoutBinding.binding = 0; // must match binding in shader
-    layoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    layoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     layoutBinding.descriptorCount = 1; // this set contains one descriptor
     // going to be accessed by compute (to compute the data) and vertex (to display it) shaders
     layoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT; 
@@ -1150,6 +1150,10 @@ void Engine::createCommandPools() {
         throw runtime_error("failed to create command pool");
     }
 }
+void Engine::destroyCommandPools() {
+    vkDestroyCommandPool(device_, computeCmdPool_,  nullptr);
+    vkDestroyCommandPool(device_, graphicsCmdPool_, nullptr);
+}
 
 // typeFilter is a bitmask specifying acceptable memory types
 // this function returns a memory of some type in typeFilter, satisfying all `properties`
@@ -1222,13 +1226,13 @@ void Engine::createBoidPositionsBuffer() {
     allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
     boidPositionsBuffer_ =
-        createBuffer(MAX_N_BOIDS*sizeof(Boid), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, allocInfo);
+        createBuffer(MAX_N_BOIDS*sizeof(Boid), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, allocInfo);
     // @todo initialize? might be fine to just expect the user to do it
 }
 
 void Engine::createDescriptorPool() {
     VkDescriptorPoolSize poolSize{};
-    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSize.descriptorCount = 1; // @todo if we did double-buffering or something, this would need to change
 
     VkDescriptorPoolCreateInfo poolInfo{};
@@ -1265,7 +1269,7 @@ void Engine::createDescriptorSet() {
     descWrite.dstSet = descriptorSet_;
     descWrite.dstBinding = 0; // make sure this matches
     descWrite.dstArrayElement = 0; // something something descriptors can be arrays but we're not doing that
-    descWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    descWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     descWrite.descriptorCount = 1;
     descWrite.pBufferInfo = &bufInfo;
     // our descriptor is for a buffer; don't need these two
@@ -1512,7 +1516,7 @@ void Engine::initVulkan() {
     createSwapchainImageViews();    cout << "created swapchain image views\n";
     createRenderPass();             cout << "created render pass\n";
     createDescriptorSetLayout();    cout << "created descriptor set layout\n";
-    createComputePipeline();        cout << "created compute pipeline\n"; // @todo destroy
+    createComputePipeline();        cout << "created compute pipeline\n";
     createGraphicsPipeline();       cout << "created graphics pipeline\n";
     createFramebuffers();           cout << "created framebuffers\n";
     createCommandPools();            cout << "created command pool\n";
@@ -1534,10 +1538,12 @@ void Engine::cleanup() {
     vmaDestroyBuffer(bufferAllocator_, attractorVertBuffer_.buffer, attractorVertBuffer_.allocation);
     vmaDestroyBuffer(bufferAllocator_, boidVertBuffer_.buffer, boidVertBuffer_.allocation);
     vmaDestroyAllocator(bufferAllocator_);
-    vkDestroyCommandPool(device_, graphicsCmdPool_, nullptr);
+    destroyCommandPools();
     destroyFramebuffers();
     vkDestroyPipeline(device_, graphicsPipeline_, nullptr);
+    vkDestroyPipeline(device_, computePipeline_ , nullptr);
     vkDestroyPipelineLayout(device_, graphicsPipelineLayout_, nullptr);
+    vkDestroyPipelineLayout(device_, computePipelineLayout_, nullptr);
     vkDestroyDescriptorSetLayout(device_, descriptorSetLayout_, nullptr);
     vkDestroyRenderPass(device_, renderPass_, nullptr);
     destroySwapchainImageViews();

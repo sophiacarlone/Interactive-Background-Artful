@@ -11,9 +11,8 @@ struct Boid {
 };
 
 // the boids buffer
-// @continue @todo you can't modify uniform buffers from shaders. You probably want a storage buffer.
-layout(binding = 0, std140) uniform Boids {
-    Boid boids[1024];
+layout(binding = 0, std140) buffer Boids {
+    Boid boids[1024]; // @todo once this is a storage buffer, we can make the limit much higher
 };
 layout(push_constant) uniform PushConsts {
     uint nBoids;
@@ -25,5 +24,6 @@ void main() {
     if (boidInd >= pushConsts.nBoids) return;
 
     // placeholder computation; I need to sleep
+    // @continue @todo implement actual boids computation
     boids[boidInd].pos += vec2(0.01);
 }
