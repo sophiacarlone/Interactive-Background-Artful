@@ -121,6 +121,7 @@ const vector<Vertex> ATTRACTOR_VERTS = {
 
 // Picked arbitarily; this is the allocated size for the boids uniform buffer.
 // Make sure this matches the size specified in the shaders.
+// @todo we're not using a uniform buffer anymore (although we might end up using one when we set up staging)
 size_t MAX_N_BOIDS = 1024;
 
 // @todo chosen arbitrarily; choose it properly and respect the device limits.
@@ -1223,6 +1224,7 @@ void Engine::createBoidPositionsBuffer() {
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     // since we're promising sequential writes only, we should only use memcpy to write to it!
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+    // @todo use a staging buffer for memory transfer instead of making this one host visible
     allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
     boidPositionsBuffer_ =

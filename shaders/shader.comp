@@ -12,18 +12,94 @@ struct Boid {
 
 // the boids buffer
 layout(binding = 0, std140) buffer Boids {
-    Boid boids[1024]; // @todo once this is a storage buffer, we can make the limit much higher
+    // The array size is just the allocation, not the number of boids.
+    // @todo since this is a storage buffer, we can make the array size larger or maybe even not specify it
+    Boid boids[1024];
 };
 layout(push_constant) uniform PushConsts {
-    uint nBoids;
-} pushConsts;
+    uint N_BOIDS;
+};
 
+const vec2 ATTRACTOR_POS = vec2(0.0); // @todo make this a push constant
+const float COLLISION_AVOIDANCE_RADIUS = 0.1;
+const float SPEED_CAP = 1.0;
+const float DT = 0.01; // time step
+// weight factors; modify to increase or decrease priority of different factors
+const float WEIGHT_SEPARATION = 0.02;
+const float WEIGHT_COHESION   = 0.50;
+const float WEIGHT_ALIGNMENT  = 1.00;
+const float WEIGHT_ATTRACTION = 1.00;
+//
 void main() {
     uint boidInd = gl_GlobalInvocationID.x;
     // if you don't have a boid to update, return immediately
-    if (boidInd >= pushConsts.nBoids) return;
+    if (boidInd >= N_BOIDS) return;
+    Boid boid = boids[boidInd];
 
-    // placeholder computation; I need to sleep
-    // @continue @todo implement actual boids computation
-    boids[boidInd].pos += vec2(0.01);
+    float reciprocalNOtherBoids = 1.0 / float(N_BOIDS - 1);
+
+    // Compute sums of boid positions and velocities.
+    // These will be used later to compute means.
+    vec2 sumPos = vec2(0.0);
+    vec2 sumVel = vec2(0.0);
+    // @todo @optimize This is a stupid placeholder computation method. Use parallel reduction for this.
+    // @optimize Stuff like this would probably be more efficient if pos and vel were together in a vec4.
+    for (int i = 0; i < N_BOIDS; ++i) {
+        sumPos += boids[i].pos;
+        sumVel += boids[i].vel;
+    }
+
+    // Compute acceleration due to cohesion
+    // @optimize maybe we can get this to become an `fma`
+    vec2 meanPos = (sumPos - boid.pos) * reciprocalNOtherBoids; // mean pos of all other boids
+    vec2 accCohesion = meanPos - boid.pos;
+
+    // Compute acceleration due to alignment
+    // @optimize maybe we can get this to become an `fma`
+    vec2 meanVel = (sumVel - boid.vel) * reciprocalNOtherBoids; // mean vel of all other boids
+    vec2 accAlignment = meanVel - boid.vel;
+
+    // Compute acceleration due to separation
+    vec2 accSeparation = vec2(0.0);
+    for (int i = 0; i < N_BOIDS; ++i) {
+        if (i == boidInd) continue; // the boid should not try to separate from itself
+        Boid otherBoid = boids[i];
+
+        vec2 disp = boid.pos - otherBoid.pos;
+        float dist = length(disp);
+        // If the other boid is too close, accelerate away from it (with acc proportional to 1/dist)
+        // @todo if dist==0, we're dividing by 0 here.
+        if (dist < COLLISION_AVOIDANCE_RADIUS) accSeparation += normalize(disp) / dist;
+    }
+
+    // Compute acceleration due to attraction to an object (e.g. the object is bread and the birds want it)
+    // @todo not sure why I decided to normalize, but it looks cool and reduces magnitude of overshooting.
+    vec2 accAttraction = normalize(ATTRACTOR_POS - boid.pos);
+
+    // Compute new boid values due to net acceleration
+    Boid newBoid;
+    vec2 netAcc =
+        WEIGHT_COHESION   * accCohesion   + 
+        WEIGHT_SEPARATION * accSeparation + 
+        WEIGHT_ALIGNMENT  * accAlignment  +
+        WEIGHT_ATTRACTION * accAttraction;
+    // @optimize under what conditions is this compiled to an `fma` instruction?
+    newBoid.vel = boid.vel + DT*netAcc;
+    // @todo what does `normalize` do when its input is has length 0?
+    newBoid.vel = normalize(newBoid.vel) * min(length(newBoid.vel), SPEED_CAP); // enforce speed limit
+    newBoid.pos = boid.pos + DT*newBoid.vel;
+    // Wrap around if crossing window border. // @todo disable this behavior
+    if      (newBoid.pos.x < -1.0) newBoid.pos.x += 2.0;
+    else if (newBoid.pos.x >  1.0) newBoid.pos.x -= 2.0;
+    if      (newBoid.pos.y < -1.0) newBoid.pos.y += 2.0;
+    else if (newBoid.pos.y >  1.0) newBoid.pos.y -= 2.0;
+
+    // @todo instruction barrier so we only write after everyone is done computing
+    // Since the boid computations depend on the positions and velocities of other boids, we should wait for
+    // every invocation to finish computing their boids before we modify the boids buffer.
+    // @optimize could we put this barrier earlier? We just need to be past the last point where the shader
+    // fetches data from the boids buffer.
+    barrier();
+    // Finally, update the boids buffer with the new values.
+    boids[boidInd] = newBoid;
 }
