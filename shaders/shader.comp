@@ -21,7 +21,7 @@ layout(push_constant) uniform PushConsts {
 };
 
 const vec2 ATTRACTOR_POS = vec2(0.0); // @todo make this a push constant
-const float COLLISION_AVOIDANCE_RADIUS = 0.1;
+const float COLLISION_AVOIDANCE_RADIUS = 0.1; // @todo make the radius scale with speed?
 const float SPEED_CAP = 1.0;
 const float DT = 0.01; // time step
 // weight factors; modify to increase or decrease priority of different factors
@@ -67,14 +67,16 @@ void main() {
 
         vec2 disp = boid.pos - otherBoid.pos;
         float dist = length(disp);
-        // If the other boid is too close, accelerate away from it (with acc proportional to 1/dist)
-        // @todo if dist==0, we're dividing by 0 here.
-        if (dist < COLLISION_AVOIDANCE_RADIUS) accSeparation += normalize(disp) / dist;
+        // If the other boid is too close, accelerate away from it (with acc proportional to 1/dist).
+        // If dist == 0.0, we'll just do nothing (so we that we don't divide by 0).
+        if (dist < COLLISION_AVOIDANCE_RADIUS && dist != 0.0) accSeparation += disp / (dist * dist);
     }
 
     // Compute acceleration due to attraction to an object (e.g. the object is bread and the birds want it)
-    // @todo not sure why I decided to normalize, but it looks cool and reduces magnitude of overshooting.
-    vec2 accAttraction = normalize(ATTRACTOR_POS - boid.pos);
+    vec2 attractorDisp = ATTRACTOR_POS - boid.pos;
+    // @todo Not sure why I decided to normalize, but it looks cool and reduces the magnitude of overshooting.
+    // Avoid normalizing the 0 vector, which isn't defined in the GLSL spec.
+    vec2 accAttraction = attractorDisp == vec2(0.0) ? vec2(0.0) : normalize(attractorDisp);
 
     // Compute new boid values due to net acceleration
     Boid newBoid;

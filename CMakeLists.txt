@@ -15,7 +15,7 @@ target_link_libraries( test
 
 # also compile the shaders
 add_custom_command(
-    OUTPUT vert.spv frag.spv
+    OUTPUT vert.spv frag.spv comp.spv
     COMMAND glslc ${CMAKE_SOURCE_DIR}/shaders/shader.vert -o vert.spv
     COMMAND glslc ${CMAKE_SOURCE_DIR}/shaders/shader.frag -o frag.spv
     COMMAND glslc ${CMAKE_SOURCE_DIR}/shaders/shader.comp -o comp.spv
