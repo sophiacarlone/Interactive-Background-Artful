@@ -14,11 +14,12 @@ using namespace cv;
 const bool DETECT_OBJECT = false;
 
 int main(int argc, char** argv) {
-   // @todo organize the computer vision stuff into a separate object or something
+   // @TODO organize the computer vision stuff into a separate object or something
     int vidnum;
     cout << "Camera number: ";
     cin >> vidnum;
-	//have openCV find best camera
+	//TODO: have openCV find best camera
+   
    VideoCapture video_load(vidnum);//capturing video from default camera//
    double fps = video_load.get(CAP_PROP_FPS); //fps for velocity calculations
    namedWindow("Adjust");//declaring window to show the image//
@@ -46,7 +47,6 @@ int main(int argc, char** argv) {
    createTrackbar("HighS", "Adjust", &Sat_high, 255);// track-bar for max saturation//
    createTrackbar("LowV", "Adjust", &Val_Low,255);//track-bar for min value//
    createTrackbar("HighV", "Adjust", &Val_high, 255);// track - bar for max value//  
-   /**/
 
    float horizontal_Last = -1;//initial horizontal position//
    float vertical_Last = -1;//initial vertical position//
@@ -54,11 +54,10 @@ int main(int argc, char** argv) {
    Mat temp;//declaring a matrix to load frames from video stream//
    video_load.read(temp);//loading frames from video stream//
    
-   Mat track_motion = Mat::zeros(temp.size(), CV_8UC3);//creating black matrix for detection//
+   // Mat track_motion = Mat::zeros(temp.size(), CV_8UC3);//creating black matrix for detection//
    
    int camera_size_vertical = temp.rows;
    int camera_size_horizontal = temp.cols;
-   //cout << camera_size_horizontal << " " << camera_size_vertical << endl;   
 
    Mat sprite = imread("./sprites/1.jpg");
 
@@ -67,6 +66,9 @@ int main(int argc, char** argv) {
    float velocityX, velocityY;
 
    engine::Engine engine;
+
+
+//? So this main should only call engine run?
 
    engine.run([&] () {
       Mat actual_Image;//declaring a matrix for actual image//
@@ -96,7 +98,6 @@ int main(int argc, char** argv) {
          // if (horizontal_Last >= 0 && vertical_Last >= 0 && posX >= 0 && posY >= 0){ //when the detected object moves//
          //    line(track_motion, Point(posX, posY), Point(horizontal_Last, vertical_Last), Scalar(0, 0, 255), 2);//draw lines of red color on the path of detected object;s motion//
          // }
-      //cout << "posx: " << posX << " posy " << posY << endl;
 
          velocityX = (posX - horizontal_Last)/(1./fps);
          velocityY = (posY - vertical_Last)/(1./fps);
@@ -107,24 +108,14 @@ int main(int argc, char** argv) {
          engine.update_position(glm::vec2(posX, posY));
       }
       
-      imshow("Detected_Object", adjusted_frame);//showing detected object//
-      actual_Image = actual_Image + track_motion;//drawing continuous line in original video frames//
+      // imshow("Detected_Object", adjusted_frame);//showing detected object//
+      // actual_Image = actual_Image + track_motion;//drawing continuous line in original video frames//
       imshow("Actual", actual_Image);//showing original video//
-      //cout << "position of the object is:" << Horizontal_Last << "," << vertical_Last << endl;//showing tracked co-ordinated values//
-      //sprite.copyTo(actual_Image, (cv::Rect(posX,posY,sprite.cols, sprite.rows)));
-      //cout << "XVELOCITY: " << velocityX << " YVELOCITY: " << velocityY << endl;
       
-      // @todo why are we waiting so long? this might significantly affect framerate
+      // @TODO why are we waiting so long? this might significantly affect framerate
       if(waitKey(30)==27){ //if esc is pressed loop will break//
-         //cout << "esc key is pressed by user" << endl;
-         exit(0); // @todo replace with `engine.stop()` or something
-      }
-      
-      //POTENTIAL RESET
-      // else if (waitKey(30)==99){ //idea for reset by pressing 'c'. going to move on
-      //    video_load.read(actual_Image);
-      //    cout << "c was pressed" << endl;
-      // } 
+         engine.stop(); //exit(0); // @TODO replace with `engine.stop()` or something
+      }      
    });
    return 0;
 }
