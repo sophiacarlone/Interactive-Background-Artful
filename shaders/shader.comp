@@ -24,6 +24,11 @@ layout(push_constant, std140) uniform PushConsts {
 // helpers to avoid branching. Never actually benchmarked to see if this was better
 vec2 whenLessThan(   vec2 a, vec2 b) { return max(sign(b - a), 0.0); }
 vec2 whenGreaterThan(vec2 a, vec2 b) { return max(sign(a - b), 0.0); }
+// `normalize` function that maps the 0 vector to itself
+vec2 normalizeIfNotZero(vec2 v) {
+    float len = length(v);
+    return v / (len + float(len != 0.0));
+}
 
 const float COLLISION_AVOIDANCE_RADIUS = 0.1; // @todo make the radius scale with speed?
 const float SPEED_CAP = 1.0;
@@ -85,8 +90,7 @@ void main() {
     vec2 attractorDisp = ATTRACTOR_POS - boid.pos;
     // @todo Not sure why I decided to normalize, but it looks cool and reduces the magnitude of overshooting.
     // Avoid normalizing the 0 vector, which isn't defined in the GLSL spec.
-    // @optimize idk how to get rid of the potential branching here
-    vec2 accAttraction = attractorDisp == vec2(0.0) ? vec2(0.0) : normalize(attractorDisp);
+    vec2 accAttraction = normalizeIfNotZero(attractorDisp);
 
     // Compute new boid values due to net acceleration
     Boid newBoid;
