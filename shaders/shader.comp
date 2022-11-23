@@ -21,6 +21,10 @@ layout(push_constant, std140) uniform PushConsts {
     uint N_BOIDS;
 };
 
+// helpers to avoid branching. Never actually benchmarked to see if this was better
+vec2 whenLessThan(   vec2 a, vec2 b) { return max(sign(b - a), 0.0); }
+vec2 whenGreaterThan(vec2 a, vec2 b) { return max(sign(a - b), 0.0); }
+
 const float COLLISION_AVOIDANCE_RADIUS = 0.1; // @todo make the radius scale with speed?
 const float SPEED_CAP = 1.0;
 const float DT = 0.01; // time step
@@ -62,20 +66,26 @@ void main() {
     // Compute acceleration due to separation
     vec2 accSeparation = vec2(0.0);
     for (int i = 0; i < N_BOIDS; ++i) {
-        if (i == boidInd) continue; // the boid should not try to separate from itself
         Boid otherBoid = boids[i];
 
         vec2 disp = boid.pos - otherBoid.pos;
         float dist = length(disp);
-        // If the other boid is too close, accelerate away from it (with acc proportional to 1/dist).
-        // If dist == 0.0, we'll just do nothing (so we that we don't divide by 0).
-        if (dist < COLLISION_AVOIDANCE_RADIUS && dist != 0.0) accSeparation += disp / (dist * dist);
+        // Accelerate away from the other boid (with acc proportional to 1/dist) iff all of:
+        //     1. it's too close to us
+        //     2. it isn't us
+        //     3. its distance from us isn't 0 (to avoid division by 0)
+        accSeparation += mix(
+            vec2(0.0),
+            disp / (dist * dist),
+            bvec2(dist < COLLISION_AVOIDANCE_RADIUS && i != boidInd && dist != 0.0)
+        );
     }
 
     // Compute acceleration due to attraction to an object (e.g. the object is bread and the birds want it)
     vec2 attractorDisp = ATTRACTOR_POS - boid.pos;
     // @todo Not sure why I decided to normalize, but it looks cool and reduces the magnitude of overshooting.
     // Avoid normalizing the 0 vector, which isn't defined in the GLSL spec.
+    // @optimize idk how to get rid of the potential branching here
     vec2 accAttraction = attractorDisp == vec2(0.0) ? vec2(0.0) : normalize(attractorDisp);
 
     // Compute new boid values due to net acceleration
@@ -91,12 +101,10 @@ void main() {
     newBoid.vel = normalize(newBoid.vel) * min(length(newBoid.vel), SPEED_CAP); // enforce speed limit
     newBoid.pos = boid.pos + DT*newBoid.vel;
     // Wrap around if crossing window border. // @todo disable this behavior
-    if      (newBoid.pos.x < -1.0) newBoid.pos.x += 2.0;
-    else if (newBoid.pos.x >  1.0) newBoid.pos.x -= 2.0;
-    if      (newBoid.pos.y < -1.0) newBoid.pos.y += 2.0;
-    else if (newBoid.pos.y >  1.0) newBoid.pos.y -= 2.0;
+    newBoid.pos +=
+         2.0 * whenLessThan(   newBoid.pos, vec2(-1.0))
+        -2.0 * whenGreaterThan(newBoid.pos, vec2( 1.0));
 
-    // @todo instruction barrier so we only write after everyone is done computing
     // Since the boid computations depend on the positions and velocities of other boids, we should wait for
     // every invocation to finish computing their boids before we modify the boids buffer.
     // @optimize could we put this barrier earlier? We just need to be past the last point where the shader
