@@ -16,11 +16,11 @@ layout(binding = 0, std140) buffer Boids {
     // @todo since this is a storage buffer, we can make the array size larger or maybe even not specify it
     Boid boids[1024];
 };
-layout(push_constant) uniform PushConsts {
+layout(push_constant, std140) uniform PushConsts {
+    vec2 ATTRACTOR_POS;
     uint N_BOIDS;
 };
 
-const vec2 ATTRACTOR_POS = vec2(0.0); // @todo make this a push constant
 const float COLLISION_AVOIDANCE_RADIUS = 0.1; // @todo make the radius scale with speed?
 const float SPEED_CAP = 1.0;
 const float DT = 0.01; // time step

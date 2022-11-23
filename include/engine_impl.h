@@ -50,7 +50,7 @@ struct Vertex {
 
         bd.binding = 0;
         bd.stride = sizeof(Vertex);
-        bd.inputRate = VK_VERTEX_INPUT_RATE_VERTEX; // not using instanced rendering
+        bd.inputRate = VK_VERTEX_INPUT_RATE_VERTEX; // I'm not sure what the other option does
 
         return bd;
     }
@@ -74,10 +74,18 @@ struct Vertex {
     }
 };
 
-// alignas qualifiers are to ensure data is aligned the way the shader expects it to be
+// alignas qualifiers are to ensure data is aligned the way the shader expects it to be (see `std140` in GLSL
+// or OpenGL spec)
 struct Boid {
     alignas(8) vec2 pos;
     alignas(8) vec2 vel;
+};
+
+// Make sure this matches the definition in the shader.
+// Also make sure it conforms to std140.
+struct ComputePushConstants {
+    alignas(8) vec2 attractorPos;
+    alignas(4) uint32_t nBoids;
 };
 
 // CONSTANTS -------------------------------------------------------------------------------------------------
@@ -882,7 +890,7 @@ void Engine::createComputePipeline() {
     // push constant info
     VkPushConstantRange pcRange{};
     pcRange.offset = 0;
-    pcRange.size = sizeof(uint32_t); // we'll submit number of boids (casted to uint32_t to be safe)
+    pcRange.size = sizeof(ComputePushConstants); // this is what we'll be submitting for the push constants
     pcRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
     // pipeline layout
@@ -931,7 +939,8 @@ void Engine::createGraphicsPipeline() {
     // specify entrypoint; we could have multiple potential entrypoints in the shader, so we pick one here
     vertShaderStageInfo.pName = "main";
     // note: ...Info.pSPecializationInfo can be used to specify constants used in the shader at pipeline
-    // creation time, which could be more efficient than pushing them during the render loop
+    // creation time, which could be more efficient than pushing them during the render loop.
+    // @todo we should probably use this to specify the local workgroup size in the compute shader.
 
     VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
     fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -1370,10 +1379,9 @@ void Engine::recordComputeCmdBuf(VkCommandBuffer cbuf) {
     }
 
     vkCmdBindPipeline(cbuf, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_);
-    // @todo push constant for attractor position
-    uint32_t n_boids_u32 = static_cast<uint32_t>(nBoids_); // dunno if we need this cast, playing it safe
+    ComputePushConstants pc = { attractorPos_, static_cast<uint32_t>(nBoids_) };
     vkCmdPushConstants(
-        cbuf, computePipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(n_boids_u32), &n_boids_u32
+        cbuf, computePipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &pc
     );
     vkCmdBindDescriptorSets( // bind the boids uniform buffer descriptor
         cbuf, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr
