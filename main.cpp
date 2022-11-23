@@ -1,17 +1,11 @@
-#include <bits/types/time_t.h>
-#include <cstddef>
 #include <iostream>
-#include <opencv2/core.hpp>
-#include <opencv2/highgui.hpp>
-#include <opencv2/imgproc.hpp>
+#include "include/object_tracking.h"
 #include <ostream>
 #include <glm/glm.hpp>
 #include "include/engine.h"
 
 using namespace std;
 using namespace cv;
-
-const bool DETECT_OBJECT = false;
 
 int main(int argc, char** argv) {
    // @TODO organize the computer vision stuff into a separate object or something
@@ -24,30 +18,6 @@ int main(int argc, char** argv) {
    double fps = video_load.get(CAP_PROP_FPS); //fps for velocity calculations
    namedWindow("Adjust");//declaring window to show the image//
 
-   //to detect a new object, set the lows to 0 and highs to 255		 
-   int Hue_Low  = 0;//lower range of hue//
-   int Hue_high = 255;//upper range of hue//
-   int Sat_Low  = 0;//lower range of saturation//
-   int Sat_high = 255;//upper range of saturation//
-   int Val_Low  = 0;//lower range of value//
-   int Val_high = 255;//upper range of value//
-   if (!DETECT_OBJECT) {
-       Hue_Low  = 36;//lower range of hue//
-       Hue_high = 91;//upper range of hue//
-       Sat_Low  = 51;//lower range of saturation//
-       Sat_high = 255;//upper range of saturation//
-       Val_Low  = 83;//lower range of value//
-       Val_high = 166;//upper range of value//
-   }
-   
-   /*USE FOR OBJECT DETECTING INFORMATION*/
-   createTrackbar("LowH", "Adjust", &Hue_Low, 179);//track-bar for min hue//
-   createTrackbar("HighH","Adjust", &Hue_high, 179);//track-bar for max hue//
-   createTrackbar("LowS", "Adjust", &Sat_Low, 255);//track-bar for min saturation//
-   createTrackbar("HighS", "Adjust", &Sat_high, 255);// track-bar for max saturation//
-   createTrackbar("LowV", "Adjust", &Val_Low,255);//track-bar for min value//
-   createTrackbar("HighV", "Adjust", &Val_high, 255);// track - bar for max value//  
-
    float horizontal_Last = -1;//initial horizontal position//
    float vertical_Last = -1;//initial vertical position//
    
@@ -59,16 +29,10 @@ int main(int argc, char** argv) {
    int camera_size_vertical = temp.rows;
    int camera_size_horizontal = temp.cols;
 
-   Mat sprite = imread("./sprites/1.jpg");
-
-   float posX, posY;
-
-   float velocityX, velocityY;
-
    engine::Engine engine;
 
-
-//? So this main should only call engine run?
+   object::Object_Track object(); //object tracked
+   object.setObjectHSV();
 
    engine.run([&] () {
       Mat actual_Image;//declaring a matrix for actual image//
@@ -93,19 +57,20 @@ int main(int argc, char** argv) {
       double tracking_area = detecting_object.m00;//getting area of the object//
 
       if (tracking_area > 10000){ //when area of the object is greater than 10000 pixels//
-         posX = ((horizontal_moment / tracking_area) / camera_size_horizontal) * 2 - 1; //calculate the horizontal position of the object//
-         posY = ((vertical_moment / tracking_area) / camera_size_vertical) * 2 - 1; //calculate the vertical position of the object//
+         object.setPosX(((horizontal_moment / tracking_area) / camera_size_horizontal) * 2 - 1); //calculate the horizontal position of the object//
+         object.setPosY(((vertical_moment / tracking_area) / camera_size_vertical) * 2 - 1); //calculate the vertical position of the object//
          // if (horizontal_Last >= 0 && vertical_Last >= 0 && posX >= 0 && posY >= 0){ //when the detected object moves//
          //    line(track_motion, Point(posX, posY), Point(horizontal_Last, vertical_Last), Scalar(0, 0, 255), 2);//draw lines of red color on the path of detected object;s motion//
          // }
 
-         velocityX = (posX - horizontal_Last)/(1./fps);
-         velocityY = (posY - vertical_Last)/(1./fps);
+         //? do we still use the object velocity here
+         object.setVelocityX(horizontal_Last, fps);
+         object.setVelocityY(vertical_Last, fps);
          
-         horizontal_Last = posX;//getting new horizontal position//
-         vertical_Last = posY;// getting new vertical position value//
+         horizontal_Last = object.getPosX();//getting new horizontal position//
+         vertical_Last = object.getPosY();// getting new vertical position value//
 
-         engine.update_position(glm::vec2(posX, posY));
+         engine.update_position(glm::vec2(object.getPosX(), object.getPosY()));
       }
       
       // imshow("Detected_Object", adjusted_frame);//showing detected object//

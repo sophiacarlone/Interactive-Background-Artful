@@ -22,6 +22,7 @@ Object_Track::Object_Track(){
 
 }
 
+//TODO: can change parameters to detect other object. Wanted to keep defaults and specifics separate for now
 void Object_Track::setObjectHSV(){
     if (!DETECT_OBJECT) {
        Hue_Low_  = 36;//lower range of hue//

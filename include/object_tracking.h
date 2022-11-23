@@ -9,7 +9,6 @@
 #include <opencv2/imgproc.hpp>
 #include <ostream>
 #include <glm/glm.hpp>
-#include "include/engine.h"
 
 class Object_Track{
     public:
@@ -21,18 +20,27 @@ class Object_Track{
     int Val_high_;//upper range of value//
     float posX_, posY_;
     float velocityX_, velocityY_;
-    // engine::Engine engine_;
-    //? So this object does nto need a engine object
 
     public:
     Object_Track();
     void run();
     void setObjectHSV();
-    //TODO: see if these are useful anywhere
-    float getPosX(){return posX_;}
-    float getPosY(){return posY_;}
-    float getVelocityX(){return velocityX_;}
-    float getVelocityY(){return velocityY_;}
+
+    float getPosX()       {return posX_;}
+    float getPosY()       {return posY_;}
+    // float getVelocityX()  {return velocityX_;}
+    // float getVelocityY()  {return velocityY_;}
+
+    float setPosX(float x){posX_ = x;}
+    float setPosY(float y){posY_ = y;}
+    
+    float setVelocityX(float horizontal_Last, double fps){
+        velocityX_ = (posX_ - horizontal_last)/(1./fps);
+    }
+    float setVelocityY(float vertical_Last, double fps){
+        velocityY_ = (posY - vertical_Last)/(1./fps);
+    }
+
 }
 
 #endif // OBJECT_TRACKING_H
