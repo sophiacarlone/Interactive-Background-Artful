@@ -1,5 +1,5 @@
 #include <iostream>
-#include "include/object_tracking.h"
+#include "include/tracker.h"
 #include <ostream>
 #include <glm/glm.hpp>
 #include "include/engine.h"
@@ -16,12 +16,28 @@ int main(int argc, char** argv) {
    
    engine::Engine engine;
 
-   Object_Track object = new Object_Track(); //object tracked
-   object.setObjectHSV();
+
+   Tracker tracker; //object tracked
+   tracker.setObjectHSV();
 
    engine.run([&] () {
-      object.run(vidnum, engine);
+      tracker.run(vidnum);
+      engine.update_position(glm::vec2(tracker.getPosX(), tracker.getPosY()));
    });
    
    return 0;
 }
+
+// #include <include/engine.h>
+// #include <include/tracker.h>
+// // ...
+
+// int main() {
+//   Tracker tracker();
+//   Engine engine();
+
+//   engine.run([&]() {
+//     vec2 pos = tracker.get_position();
+//     engine.update_position(pos);
+//   });
+// }
