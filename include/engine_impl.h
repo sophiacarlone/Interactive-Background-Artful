@@ -74,15 +74,16 @@ struct Vertex {
     }
 };
 
-// alignas qualifiers are to ensure data is aligned the way the shader expects it to be (see `std140` in GLSL
-// or OpenGL spec)
+// The compute shader expects this to look like a vec4, hence the alignment qualifiers (which would have been
+// needed anyway to conform to std140).
 struct Boid {
     alignas(8) vec2 pos;
     alignas(8) vec2 vel;
 };
 
 // Make sure this matches the definition in the shader.
-// Also make sure it conforms to std140.
+// alignas qualifiers are to ensure data is aligned the way the shader expects it to be (see `std140` in GLSL
+// or OpenGL spec).
 struct ComputePushConstants {
     alignas(8) vec2 attractorPos;
     alignas(4) uint32_t nBoids;

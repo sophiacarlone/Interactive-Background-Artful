@@ -5,16 +5,15 @@
 // and pass in via... a specialization constant or something?)
 layout(local_size_x = 32) in;
 
-struct Boid {
-    vec2 pos;
-    vec2 vel;
-};
-
 // the boids buffer
 layout(binding = 0, std140) buffer Boids {
     // The array size is just the allocation, not the number of boids.
     // @todo since this is a storage buffer, we can make the array size larger or maybe even not specify it
-    Boid boids[1024];
+    // 
+    // We're representing a `struct Boid { vec2 pos; vec2 vel; }` as a vec4, where
+    // boid.xy is the pos and boid.zw is the vel.
+    // This allows us to compute some values (like means) simultaneously for both pos and vel.
+    vec4 boids[1024];
 };
 layout(push_constant, std140) uniform PushConsts {
     vec2 ATTRACTOR_POS;
@@ -48,37 +47,25 @@ void main() {
     uint boidInd = gl_GlobalInvocationID.x;
     // if you don't have a boid to update, return immediately
     if (boidInd >= N_BOIDS) return;
-    Boid boid = boids[boidInd];
+    vec4 boid = boids[boidInd];
 
     float reciprocalNOtherBoids = 1.0 / float(N_BOIDS - 1);
 
-    // Compute sums of boid positions and velocities.
-    // These will be used later to compute means.
-    vec2 sumPos = vec2(0.0);
-    vec2 sumVel = vec2(0.0);
-    // @todo @optimize This is a stupid placeholder computation method. Use parallel reduction for this.
-    // @optimize Stuff like this would probably be more efficient if pos and vel were together in a vec4.
-    for (int i = 0; i < N_BOIDS; ++i) {
-        sumPos += boids[i].pos;
-        sumVel += boids[i].vel;
-    }
-
-    // Compute acceleration due to cohesion
-    // @optimize maybe we can get this to become an `fma`
-    vec2 meanPos = (sumPos - boid.pos) * reciprocalNOtherBoids; // mean pos of all other boids
-    vec2 accCohesion = meanPos - boid.pos;
-
-    // Compute acceleration due to alignment
-    // @optimize maybe we can get this to become an `fma`
-    vec2 meanVel = (sumVel - boid.vel) * reciprocalNOtherBoids; // mean vel of all other boids
-    vec2 accAlignment = meanVel - boid.vel;
+    // Compute acceleration due to cohesion  (meanPos - ourPos)
+    // Compute acceleration due to alignment (meanVel - ourVel)
+    // @todo @optimize this can be done using parallel reduction
+    vec4 sumPos_sumVel = vec4(0.0);
+    for (int i = 0; i < N_BOIDS; ++i) sumPos_sumVel += boids[i];
+    vec4 meanPos_meanVel = (sumPos_sumVel - boid) * reciprocalNOtherBoids; // mean values of all other boids
+    vec4 accCohesion_accAlignment = meanPos_meanVel - boid;
 
     // Compute acceleration due to separation
     vec2 accSeparation = vec2(0.0);
+    // @todo we could put this in the same `for` loop as the sumPos_sumVel computation
     for (int i = 0; i < N_BOIDS; ++i) {
-        Boid otherBoid = boids[i];
+        vec2 otherBoidPos = boids[i].xy;
 
-        vec2 disp = boid.pos - otherBoid.pos;
+        vec2 disp = boid.xy - otherBoidPos;
         float dist = length(disp);
         // Accelerate away from the other boid (with acc proportional to 1/dist) iff all of:
         //     1. it's too close to us
@@ -92,28 +79,28 @@ void main() {
     }
 
     // Compute acceleration due to attraction to an object (e.g. the object is bread and the birds want it)
-    vec2 attractorDisp = ATTRACTOR_POS - boid.pos;
+    vec2 attractorDisp = ATTRACTOR_POS - boid.xy;
     // @todo Not sure why I decided to normalize, but it looks cool and reduces the magnitude of overshooting.
     // Avoid normalizing the 0 vector, which isn't defined in the GLSL spec.
     vec2 accAttraction = normalizeIfNotZero(attractorDisp);
 
     // Compute new boid values due to net acceleration
-    Boid newBoid;
+    vec4 newBoid;
     vec2 netAcc =
-        WEIGHT_COHESION   * accCohesion   + 
-        WEIGHT_SEPARATION * accSeparation + 
-        WEIGHT_ALIGNMENT  * accAlignment  +
+        WEIGHT_COHESION   * accCohesion_accAlignment.xy + 
+        WEIGHT_SEPARATION * accSeparation               + 
+        WEIGHT_ALIGNMENT  * accCohesion_accAlignment.zw +
         WEIGHT_ATTRACTION * accAttraction;
     // @optimize under what conditions is this compiled to an `fma` instruction?
-    newBoid.vel = boid.vel + DT*netAcc;
+    newBoid.zw = boid.zw + DT*netAcc;
     // enforce speed limits
-    float speed = length(newBoid.vel);
-    newBoid.vel = divideIfNotZero(newBoid.vel, speed) * clamp(speed, SPEED_MIN, SPEED_MAX);
-    newBoid.pos = boid.pos + DT*newBoid.vel;
+    float speed = length(newBoid.zw);
+    newBoid.zw = divideIfNotZero(newBoid.zw, speed) * clamp(speed, SPEED_MIN, SPEED_MAX);
+    newBoid.xy = boid.xy + DT*newBoid.zw;
     // Wrap around if crossing window border. // @todo disable this behavior
-    newBoid.pos +=
-         2.0 * whenLessThan(   newBoid.pos, vec2(-1.0))
-        -2.0 * whenGreaterThan(newBoid.pos, vec2( 1.0));
+    newBoid.xy +=
+         2.0 * whenLessThan(   newBoid.xy, vec2(-1.0))
+        -2.0 * whenGreaterThan(newBoid.xy, vec2( 1.0));
 
     // Since the boid computations depend on the positions and velocities of other boids, we should wait for
     // every invocation to finish computing their boids before we modify the boids buffer.
