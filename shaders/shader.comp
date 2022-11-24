@@ -45,27 +45,21 @@ const float WEIGHT_ATTRACTION = 1.00;
 //
 void main() {
     uint boidInd = gl_GlobalInvocationID.x;
-    // if you don't have a boid to update, return immediately
-    if (boidInd >= N_BOIDS) return;
+    if (boidInd >= N_BOIDS) return; // if you don't have a boid to update, return immediately
     vec4 boid = boids[boidInd];
 
     float reciprocalNOtherBoids = 1.0 / float(N_BOIDS - 1);
 
-    // Compute acceleration due to cohesion  (meanPos - ourPos)
-    // Compute acceleration due to alignment (meanVel - ourVel)
-    // @todo @optimize this can be done using parallel reduction
-    vec4 sumPos_sumVel = vec4(0.0);
-    for (int i = 0; i < N_BOIDS; ++i) sumPos_sumVel += boids[i];
-    vec4 meanPos_meanVel = (sumPos_sumVel - boid) * reciprocalNOtherBoids; // mean values of all other boids
-    vec4 accCohesion_accAlignment = meanPos_meanVel - boid;
-
     // Compute acceleration due to separation
     vec2 accSeparation = vec2(0.0);
-    // @todo we could put this in the same `for` loop as the sumPos_sumVel computation
+    vec4 sumPos_sumVel = vec4(0.0); // we'll also compute this for use in Cohesion and Aligment later
     for (int i = 0; i < N_BOIDS; ++i) {
-        vec2 otherBoidPos = boids[i].xy;
+        vec4 otherBoid = boids[i];
+        // This sum could be computed using parallel reduction, but we need to iterate over the entire array
+        // for the separation computation anyway, so there probably isn't much point.
+        sumPos_sumVel += otherBoid;
 
-        vec2 disp = boid.xy - otherBoidPos;
+        vec2 disp = boid.xy - otherBoid.xy;
         float dist = length(disp);
         // Accelerate away from the other boid (with acc proportional to 1/dist) iff all of:
         //     1. it's too close to us
@@ -77,6 +71,10 @@ void main() {
             bvec2(dist < COLLISION_AVOIDANCE_RADIUS && i != boidInd && dist != 0.0)
         );
     }
+    // Compute acceleration due to cohesion  (meanPos - ourPos)
+    // Compute acceleration due to alignment (meanVel - ourVel)
+    vec4 meanPos_meanVel = (sumPos_sumVel - boid) * reciprocalNOtherBoids; // mean values of all other boids
+    vec4 accCohesion_accAlignment = meanPos_meanVel - boid;
 
     // Compute acceleration due to attraction to an object (e.g. the object is bread and the birds want it)
     vec2 attractorDisp = ATTRACTOR_POS - boid.xy;
