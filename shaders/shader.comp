@@ -24,14 +24,19 @@ layout(push_constant, std140) uniform PushConsts {
 // helpers to avoid branching. Never actually benchmarked to see if this was better
 vec2 whenLessThan(   vec2 a, vec2 b) { return max(sign(b - a), 0.0); }
 vec2 whenGreaterThan(vec2 a, vec2 b) { return max(sign(a - b), 0.0); }
-// `normalize` function that maps the 0 vector to itself
+// If divisor is 0, returns v unmodified.
+vec2 divideIfNotZero(vec2 v, float divisor) {
+    return v / (divisor + float(divisor == 0.0));
+}
+// `normalize` function that maps the 0 vector to itself.
 vec2 normalizeIfNotZero(vec2 v) {
     float len = length(v);
-    return v / (len + float(len != 0.0));
+    return divideIfNotZero(v, len);
 }
 
 const float COLLISION_AVOIDANCE_RADIUS = 0.1; // @todo make the radius scale with speed?
-const float SPEED_CAP = 1.0;
+const float SPEED_MAX = 1.0;
+const float SPEED_MIN = 0.1;
 const float DT = 0.01; // time step
 // weight factors; modify to increase or decrease priority of different factors
 const float WEIGHT_SEPARATION = 0.02;
@@ -101,8 +106,9 @@ void main() {
         WEIGHT_ATTRACTION * accAttraction;
     // @optimize under what conditions is this compiled to an `fma` instruction?
     newBoid.vel = boid.vel + DT*netAcc;
-    // @todo what does `normalize` do when its input is has length 0?
-    newBoid.vel = normalize(newBoid.vel) * min(length(newBoid.vel), SPEED_CAP); // enforce speed limit
+    // enforce speed limits
+    float speed = length(newBoid.vel);
+    newBoid.vel = divideIfNotZero(newBoid.vel, speed) * clamp(speed, SPEED_MIN, SPEED_MAX);
     newBoid.pos = boid.pos + DT*newBoid.vel;
     // Wrap around if crossing window border. // @todo disable this behavior
     newBoid.pos +=
