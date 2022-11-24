@@ -79,32 +79,30 @@ void main() {
     // Compute acceleration due to attraction to an object (e.g. the object is bread and the birds want it)
     vec2 attractorDisp = ATTRACTOR_POS - boid.xy;
     // @todo Not sure why I decided to normalize, but it looks cool and reduces the magnitude of overshooting.
-    // Avoid normalizing the 0 vector, which isn't defined in the GLSL spec.
     vec2 accAttraction = normalizeIfNotZero(attractorDisp);
 
     // Compute new boid values due to net acceleration
-    vec4 newBoid;
     vec2 netAcc =
         WEIGHT_COHESION   * accCohesion_accAlignment.xy + 
         WEIGHT_SEPARATION * accSeparation               + 
         WEIGHT_ALIGNMENT  * accCohesion_accAlignment.zw +
         WEIGHT_ATTRACTION * accAttraction;
     // @optimize under what conditions is this compiled to an `fma` instruction?
-    newBoid.zw = boid.zw + DT*netAcc;
+    boid.zw += DT*netAcc;
     // enforce speed limits
-    float speed = length(newBoid.zw);
-    newBoid.zw = divideIfNotZero(newBoid.zw, speed) * clamp(speed, SPEED_MIN, SPEED_MAX);
-    newBoid.xy = boid.xy + DT*newBoid.zw;
-    // Wrap around if crossing window border. // @todo disable this behavior
-    newBoid.xy +=
-         2.0 * whenLessThan(   newBoid.xy, vec2(-1.0))
-        -2.0 * whenGreaterThan(newBoid.xy, vec2( 1.0));
+    float speed = length(boid.zw);
+    boid.zw = divideIfNotZero(boid.zw, speed) * clamp(speed, SPEED_MIN, SPEED_MAX);
+    boid.xy += DT*boid.zw;
+    // Wrap around if crossing window border. // @todo disable this behavior?
+    boid.xy +=
+         2.0 * whenLessThan(   boid.xy, vec2(-1.0))
+        -2.0 * whenGreaterThan(boid.xy, vec2( 1.0));
 
     // Since the boid computations depend on the positions and velocities of other boids, we should wait for
     // every invocation to finish computing their boids before we modify the boids buffer.
     // @optimize could we put this barrier earlier? We just need to be past the last point where the shader
-    // fetches data from the boids buffer.
+    // fetches data from the boids buffer. Maybe use some kind of memory access barrier?
     barrier();
     // Finally, update the boids buffer with the new values.
-    boids[boidInd] = newBoid;
+    boids[boidInd] = boid;
 }
