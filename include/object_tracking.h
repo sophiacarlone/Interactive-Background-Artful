@@ -23,7 +23,7 @@ class Object_Track{
 
     public:
     Object_Track();
-    void run();
+    void run(int vidnum, Engine &engine);
     void setObjectHSV();
 
     float getPosX()       {return posX_;}
@@ -31,14 +31,14 @@ class Object_Track{
     // float getVelocityX()  {return velocityX_;}
     // float getVelocityY()  {return velocityY_;}
 
-    float setPosX(float x){posX_ = x;}
-    float setPosY(float y){posY_ = y;}
+    void setPosX(float x){posX_ = x;}
+    void setPosY(float y){posY_ = y;}
     
-    float setVelocityX(float horizontal_Last, double fps){
+    void setVelocityX(float horizontal_last, double fps){
         velocityX_ = (posX_ - horizontal_last)/(1./fps);
     }
-    float setVelocityY(float vertical_Last, double fps){
-        velocityY_ = (posY - vertical_Last)/(1./fps);
+    void setVelocityY(float vertical_Last, double fps){
+        velocityY_ = (posY_ - vertical_Last)/(1./fps);
     }
 
 }
