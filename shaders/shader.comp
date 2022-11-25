@@ -7,13 +7,10 @@ layout(local_size_x = 32) in;
 
 // the boids buffer
 layout(binding = 0, std140) buffer Boids {
-    // The array size is just the allocation, not the number of boids.
-    // @todo since this is a storage buffer, we can make the array size larger or maybe even not specify it
-    // 
     // We're representing a `struct Boid { vec2 pos; vec2 vel; }` as a vec4, where
     // boid.xy is the pos and boid.zw is the vel.
     // This allows us to compute some values (like means) simultaneously for both pos and vel.
-    vec4 boids[1024];
+    vec4 boids[];
 };
 layout(push_constant, std140) uniform PushConsts {
     vec2 ATTRACTOR_POS;

@@ -16,11 +16,7 @@ struct Boid {
 // Most importantly, the stride over an array will be the base alignment of an element rounded up to the size
 // of a vec4.
 layout(binding = 0, std140) buffer Boids {
-    // The array size is just the allocation, not necessarily how many we'll render.
-    // I picked the number arbitrarily. I think the biggest we can make it is defined by
-    // VkPhysicalDeviceLimits::maxUniformBufferRange.
-    Boid boids[1024]; // @todo once this is a storage buffer, we can make the limit much higher
-    // @todo add data to represent orientation
+    Boid boids[];
 };
 
 // @todo why are we reusing the 0 framebuffer?

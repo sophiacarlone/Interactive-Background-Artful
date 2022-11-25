@@ -129,11 +129,6 @@ const vector<Vertex> ATTRACTOR_VERTS = {
     { {-0.025f, -0.043f}, {0.0f, 0.0f, 1.0f} }
 };
 
-// Picked arbitarily; this is the allocated size for the boids uniform buffer.
-// Make sure this matches the size specified in the shaders.
-// @todo we're not using a uniform buffer anymore (although we might end up using one when we set up staging)
-size_t MAX_N_BOIDS = 1024;
-
 // @todo chosen arbitrarily; choose it properly and respect the device limits.
 // Make sure this matches the size specified in the shader.
 uint32_t COMPUTE_LOCAL_WORKGROUP_SIZE = 32;
@@ -167,7 +162,7 @@ struct SwapchainSupportDetails {
 
 class Engine {
 public:
-    Engine(size_t nBoids) : nBoids_(nBoids) {}
+    Engine(size_t nBoids) : N_BOIDS_(nBoids) {}
     void run(std::function<void()> mainLoopCallback);
     void updateAttractor(vec2 newPos) { attractorPos_ = newPos; }
 
@@ -176,6 +171,7 @@ private:
     VkInstance instance_;
     VkSurfaceKHR surface_;
     VkPhysicalDevice physicalDevice_;
+    VkPhysicalDeviceProperties physicalDeviceProperties_; // save here for easier querying
     VkDevice device_;
     // queues
     VkQueue graphicsQueue_;
@@ -216,9 +212,11 @@ private:
     AllocatedBuffer boidPositionsBuffer_;
     VkDescriptorPool descriptorPool_;
     VkDescriptorSet descriptorSet_;
+    // DON'T remove the `const` qualifier without considering the fact that the boids buffer doesn't
+    // automatically get reallocated.
+    const size_t N_BOIDS_; // so we know how big the boids buffer should be and how many instances to draw
     // world state (i.e. states of objects in the virtual world)
     vec2 attractorPos_; // the thing attracting the boids
-    size_t nBoids_; // so we know how many instances to draw
 
     // functions called by run()
     void initWindow();
@@ -283,17 +281,13 @@ void Engine::run(std::function<void()> mainLoopCallback) {
 }
 
 void Engine::initBoidsBuffer() {
-    if (nBoids_ > MAX_N_BOIDS) {
-        throw runtime_error("exceeded max number of allowed boids (" + std::to_string(MAX_N_BOIDS) + ")");
-    }
-
     // set up RNG stuff
     std::random_device true_rng;
     std::mt19937 generator(true_rng());
     std::uniform_real_distribution<float> rng(-1.0, 1.0);
 
     // Randomly distribute the boids. This looks significantly nicer than, e.g., distributing them linearly.
-    vector<Boid> boids(nBoids_);
+    vector<Boid> boids(N_BOIDS_);
     for (Boid& boid : boids) {
         boid.pos = vec2(rng(generator), rng(generator));
         boid.vel = vec2(0.0);
@@ -1247,9 +1241,14 @@ void Engine::createBoidsBuffer() {
     // @todo use a staging buffer for memory transfer instead of making this one host visible
     allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
+    // verify that it doesn't require too much memory
+    size_t max_n_boids = physicalDeviceProperties_.limits.maxStorageBufferRange / sizeof(Boid);
+    if (N_BOIDS_ > max_n_boids) {
+        throw runtime_error("exceeded max possible number of boids (" + std::to_string(max_n_boids) + ")");
+    }
+
     boidPositionsBuffer_ =
-        createBuffer(MAX_N_BOIDS*sizeof(Boid), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, allocInfo);
-    // @todo initialize? might be fine to just expect the user to do it
+        createBuffer(N_BOIDS_*sizeof(Boid), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, allocInfo);
 }
 
 void Engine::createDescriptorPool() {
@@ -1284,7 +1283,7 @@ void Engine::createDescriptorSet() {
     VkDescriptorBufferInfo bufInfo{}; // info for a descriptor describing a buffer
     bufInfo.buffer = boidPositionsBuffer_.buffer;
     bufInfo.offset = 0;
-    bufInfo.range = MAX_N_BOIDS * sizeof(Boid);
+    bufInfo.range = N_BOIDS_ * sizeof(Boid);
     //
     VkWriteDescriptorSet descWrite{};
     descWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1362,7 +1361,7 @@ void Engine::recordGraphicsCmdBuf(VkCommandBuffer cbuf, uint32_t imageIndex) {
     vkCmdBindDescriptorSets( // bind the boids uniform buffer descriptor
         cbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr
     );
-    vkCmdDraw(cbuf, static_cast<uint32_t>(BOID_VERTS.size()), nBoids_, 0, 0);
+    vkCmdDraw(cbuf, static_cast<uint32_t>(BOID_VERTS.size()), N_BOIDS_, 0, 0);
     vkCmdEndRenderPass(cbuf);
 
     if (vkEndCommandBuffer(cbuf) != VK_SUCCESS) {
@@ -1380,14 +1379,14 @@ void Engine::recordComputeCmdBuf(VkCommandBuffer cbuf) {
     }
 
     vkCmdBindPipeline(cbuf, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_);
-    ComputePushConstants pc = { attractorPos_, static_cast<uint32_t>(nBoids_) };
+    ComputePushConstants pc = { attractorPos_, static_cast<uint32_t>(N_BOIDS_) };
     vkCmdPushConstants(
         cbuf, computePipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &pc
     );
     vkCmdBindDescriptorSets( // bind the boids uniform buffer descriptor
         cbuf, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr
     );
-    uint32_t n_local_workgroups = ceil((float)nBoids_ / (float)COMPUTE_LOCAL_WORKGROUP_SIZE);
+    uint32_t n_local_workgroups = ceil((float)N_BOIDS_ / (float)COMPUTE_LOCAL_WORKGROUP_SIZE);
     vkCmdDispatch(cbuf, n_local_workgroups, 1, 1);
 
     if (vkEndCommandBuffer(cbuf) != VK_SUCCESS) {
@@ -1446,11 +1445,12 @@ void Engine::selectPhysicalDevice() {
     if (*bestRatingIterator == 0) throw runtime_error("found no suitable physical device");
     physicalDevice_ = devices[bestRatingIterator - deviceRatings.begin()];
 
+    // save device properties for easy querying
+    vkGetPhysicalDeviceProperties(physicalDevice_, &physicalDeviceProperties_);
+
     // print chosen device
-    VkPhysicalDeviceProperties deviceProperties;
-    vkGetPhysicalDeviceProperties(physicalDevice_, &deviceProperties);
     #ifndef NDEBUG
-        cout << "chose " << deviceProperties.deviceName << '\n';
+        cout << "chose " << physicalDeviceProperties_.deviceName << '\n';
     #endif
 }
 
