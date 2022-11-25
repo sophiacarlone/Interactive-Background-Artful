@@ -7,25 +7,29 @@
 using namespace std;
 using namespace cv;
 
+#ifdef NDEBUG
+    const bool SHOW_TRACKER_WINDOWS = false;
+#else
+    const bool SHOW_TRACKER_WINDOWS = true;
+#endif
+
 int main(int argc, char** argv) {
-   // @TODO organize the computer vision stuff into a separate object or something
     int vidnum;
     cout << "Camera number: ";
     cin >> vidnum;
 	//TODO: have openCV find best camera
    
-   engine::Engine engine;
+    engine::Engine engine;
 
+    tracker::Tracker tracker(vidnum, SHOW_TRACKER_WINDOWS); //object tracker
+    tracker.setObjectHSV();
 
-   Tracker tracker; //object tracked
-   tracker.setObjectHSV();
-
-   engine.run([&] () {
-      tracker.run(vidnum);
-      engine.update_position(glm::vec2(tracker.getPosX(), tracker.getPosY()));
-   });
-   
-   return 0;
+    engine.run([&] () {
+        cv::Point2d pos = tracker.getPos();
+        engine.update_position(glm::vec2(pos.x, pos.y));
+    });
+    
+    return 0;
 }
 
 // #include <include/engine.h>

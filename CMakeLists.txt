@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.13)
 project( test )
-add_executable( test main.cpp include/tracker.cpp)
+add_executable( test main.cpp include/tracker.cpp )
 
 find_package( OpenCV REQUIRED )
 find_package( glfw3 REQUIRED )
