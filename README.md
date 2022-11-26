@@ -8,7 +8,16 @@ Incorporates OpenCV
 
 ## Building
 
-```
+The following will build all targets.
+```bash
+mkdir -p build
 cd build
-cmake .. && make
+cmake ..
+make
+```
+If you only want to build a specific target, you could replace `make` with any of:
+```bash
+make test         # to test the tracker and boids engine together
+make test-tracker # to test just the tracker
+make test-boids   # to test just the boids
 ```
