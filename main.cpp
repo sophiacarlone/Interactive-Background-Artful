@@ -1,7 +1,7 @@
 #include <iostream>
 #include "include/tracker.h"
 #include <ostream>
-#include <glm/glm.hpp>
+#include <thread>
 #include "include/engine.h"
 
 using namespace std;
@@ -22,15 +22,21 @@ int main(int argc, char** argv) {
     cin >> vidnum;
 	//TODO: have openCV find best camera
    
+    // initialize
     engine::Engine engine(N_BOIDS);
-
-    tracker::Tracker tracker(vidnum, SHOW_TRACKER_WINDOWS); //object tracker
+    tracker::Tracker tracker(vidnum, SHOW_TRACKER_WINDOWS);
     tracker.setObjectHSV();
 
-    engine.run([&] () {
-        cv::Point2d pos = tracker.getPos();
-        engine.updateAttractor(vec2(pos.x, pos.y));
+    // let tracker and engine run simultaneously
+    std::thread engine_thread([&engine, &tracker]() {
+        engine.run([&engine, &tracker]() {
+            cv::Point2d pos = tracker.getPos();
+            engine.updateAttractor(vec2(pos.x, pos.y));
+        });
     });
+    // Note: keeping tracker in the main thread because it breaks when attempting to update its windows from
+    // another thread (OpenCV limitation).
+    tracker.run();
     
     return 0;
 }

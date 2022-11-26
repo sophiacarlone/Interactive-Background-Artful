@@ -55,48 +55,52 @@ void Tracker::setObjectHSV(){
 
 }
 
-Point2d Tracker::getPos() {
-	cout << input_image_.size();
-    // double fps = video_load.get(CAP_PROP_FPS); //fps for velocity calculations
-    
-	bool temp_load = vid_.read(input_image_);//loading frames from video to the matrix//
-	flip(input_image_, input_image_, 1); // mirror so it's more intuitive for user
-	cvtColor(input_image_, converted_to_HSV_, COLOR_BGR2HSV);//converting BGR image to HSV//
-	inRange(converted_to_HSV_,Scalar(Hue_Low_, Sat_Low_, Val_Low_),
-	Scalar(Hue_high_, Sat_high_, Val_high_), adjusted_frame_);//applying change of values of track-bars//        
-	// get rid of tiny white pixels due to noise
-	erode(adjusted_frame_,adjusted_frame_,getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
-	dilate(adjusted_frame_, adjusted_frame_,getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
-	// get rid of tiny holes in white objects due to noise
-	dilate(adjusted_frame_, adjusted_frame_,getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
-	erode(adjusted_frame_, adjusted_frame_, getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
-	
-	Moments detecting_object = moments(adjusted_frame_);//creating an object from detected color frame//
-	double vertical_moment = detecting_object.m01;//getting value of vertical position//
-	double horizontal_moment = detecting_object.m10;//getting value of horizontal position//
-	double tracking_area = detecting_object.m00;//getting area of the object//
-
-	if (tracking_area > 10000){ //when area of the object is greater than 10000 pixels//
-		posX_ = ((horizontal_moment / tracking_area) / camera_size_horizontal_) * 2 - 1; //calculate the horizontal position of the object//
-		posY_ = ((vertical_moment / tracking_area) / camera_size_vertical_) * 2 - 1; //calculate the vertical position of the object//
-		// if (horizontal_Last >= 0 && vertical_Last >= 0 && posX >= 0 && posY >= 0){ //when the detected object moves//
-		//    line(track_motion, Point(posX, posY), Point(horizontal_Last, vertical_Last), Scalar(0, 0, 255), 2);//draw lines of red color on the path of detected object;s motion//
-		// }
-
-	//  //? do we still use the object velocity here
-	//  object.setVelocityX(horizontal_Last, fps);
-	//  object.setVelocityY(vertical_Last, fps);
+void Tracker::run() {
+	while (true) {
+		// double fps = video_load.get(CAP_PROP_FPS); //fps for velocity calculations
 		
-		horizontal_Last_ = posX_;//getting new horizontal position//
-		vertical_Last_ = posY_;// getting new vertical position value//
+		bool temp_load = vid_.read(input_image_);//loading frames from video to the matrix//
+		flip(input_image_, input_image_, 1); // mirror so it's more intuitive for user
+		cvtColor(input_image_, converted_to_HSV_, COLOR_BGR2HSV);//converting BGR image to HSV//
+		inRange(converted_to_HSV_,Scalar(Hue_Low_, Sat_Low_, Val_Low_),
+		Scalar(Hue_high_, Sat_high_, Val_high_), adjusted_frame_);//applying change of values of track-bars//        
+		// get rid of tiny white pixels due to noise
+		erode(adjusted_frame_,adjusted_frame_,getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
+		dilate(adjusted_frame_, adjusted_frame_,getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
+		// get rid of tiny holes in white objects due to noise
+		dilate(adjusted_frame_, adjusted_frame_,getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
+		erode(adjusted_frame_, adjusted_frame_, getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
+		
+		Moments detecting_object = moments(adjusted_frame_);//creating an object from detected color frame//
+		double vertical_moment = detecting_object.m01;//getting value of vertical position//
+		double horizontal_moment = detecting_object.m10;//getting value of horizontal position//
+		double tracking_area = detecting_object.m00;//getting area of the object//
+
+		if (tracking_area > 10000){ //when area of the object is greater than 10000 pixels//
+			posX_ = ((horizontal_moment / tracking_area) / camera_size_horizontal_) * 2 - 1; //calculate the horizontal position of the object//
+			posY_ = ((vertical_moment / tracking_area) / camera_size_vertical_) * 2 - 1; //calculate the vertical position of the object//
+			// if (horizontal_Last >= 0 && vertical_Last >= 0 && posX >= 0 && posY >= 0){ //when the detected object moves//
+			//    line(track_motion, Point(posX, posY), Point(horizontal_Last, vertical_Last), Scalar(0, 0, 255), 2);//draw lines of red color on the path of detected object;s motion//
+			// }
+
+		//  //? do we still use the object velocity here
+		//  object.setVelocityX(horizontal_Last, fps);
+		//  object.setVelocityY(vertical_Last, fps);
+			
+			horizontal_Last_ = posX_;//getting new horizontal position//
+			vertical_Last_ = posY_;// getting new vertical position value//
+		}
+		
+		if (show_windows_) {
+			imshow("Actual", input_image_);//showing original video//
+			imshow("Detected_Object", adjusted_frame_);//showing detected object//
+			// actual_Image = actual_Image + track_motion;//drawing continuous line in original video frames//
+		}
+		waitKey(1); // waitKey() is required for `imshow` to actually show something
 	}
-	
-	if (show_windows_) {
-		imshow("Actual", input_image_);//showing original video//
-		imshow("Detected_Object", adjusted_frame_);//showing detected object//
-		// actual_Image = actual_Image + track_motion;//drawing continuous line in original video frames//
-	}
-	waitKey(1); // waitKey() is required for `imshow` to actually show something
-   
+}
+
+
+Point2d Tracker::getPos() {
 	return Point2d(posX_, posY_);
 }

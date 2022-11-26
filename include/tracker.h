@@ -36,6 +36,7 @@ class Tracker{
     public:
         Tracker(int vidnum, bool showWindows);
         void setObjectHSV();
+        void run();
 
         cv::Point2d getPos();
         // float getVelocityX()  {return velocityX_;}
