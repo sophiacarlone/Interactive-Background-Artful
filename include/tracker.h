@@ -27,6 +27,11 @@ class Tracker{
         float vertical_Last_ = -1;//initial vertical position//
         float posX_, posY_;
         // float velocityX_, velocityY_;
+
+        // storing some intermediate variables here to avoid reallocating every time getPos is called
+        cv::UMat input_image_; // the image we get from the camera
+        cv::UMat converted_to_HSV_;
+        cv::UMat adjusted_frame_; // image after applying color thresholding
         
     public:
         Tracker(int vidnum, bool showWindows);

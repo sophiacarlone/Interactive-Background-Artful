@@ -56,25 +56,22 @@ void Tracker::setObjectHSV(){
 }
 
 Point2d Tracker::getPos() {
+	cout << input_image_.size();
     // double fps = video_load.get(CAP_PROP_FPS); //fps for velocity calculations
     
-	Mat actual_Image;//declaring a matrix for actual image//
-	bool temp_load = vid_.read(actual_Image);//loading frames from video to the matrix//
-	flip(actual_Image, actual_Image, 1); // mirror so it's more intuitive for user
-	Mat converted_to_HSV;//declaring a matrix to store converted image//
-	cvtColor(actual_Image, converted_to_HSV, COLOR_BGR2HSV);//converting BGR image to HSV//
-	Mat adjusted_frame;//declaring a matrix to detected color//
-
-	inRange(converted_to_HSV,Scalar(Hue_Low_, Sat_Low_, Val_Low_),
-	Scalar(Hue_high_, Sat_high_, Val_high_), adjusted_frame);//applying change of values of track-bars//        
+	bool temp_load = vid_.read(input_image_);//loading frames from video to the matrix//
+	flip(input_image_, input_image_, 1); // mirror so it's more intuitive for user
+	cvtColor(input_image_, converted_to_HSV_, COLOR_BGR2HSV);//converting BGR image to HSV//
+	inRange(converted_to_HSV_,Scalar(Hue_Low_, Sat_Low_, Val_Low_),
+	Scalar(Hue_high_, Sat_high_, Val_high_), adjusted_frame_);//applying change of values of track-bars//        
 	// get rid of tiny white pixels due to noise
-	erode(adjusted_frame,adjusted_frame,getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
-	dilate(adjusted_frame, adjusted_frame,getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
+	erode(adjusted_frame_,adjusted_frame_,getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
+	dilate(adjusted_frame_, adjusted_frame_,getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
 	// get rid of tiny holes in white objects due to noise
-	dilate(adjusted_frame, adjusted_frame,getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
-	erode(adjusted_frame, adjusted_frame, getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
+	dilate(adjusted_frame_, adjusted_frame_,getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
+	erode(adjusted_frame_, adjusted_frame_, getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
 	
-	Moments detecting_object = moments(adjusted_frame);//creating an object from detected color frame//
+	Moments detecting_object = moments(adjusted_frame_);//creating an object from detected color frame//
 	double vertical_moment = detecting_object.m01;//getting value of vertical position//
 	double horizontal_moment = detecting_object.m10;//getting value of horizontal position//
 	double tracking_area = detecting_object.m00;//getting area of the object//
@@ -95,8 +92,8 @@ Point2d Tracker::getPos() {
 	}
 	
 	if (show_windows_) {
-		imshow("Actual", actual_Image);//showing original video//
-		imshow("Detected_Object", adjusted_frame);//showing detected object//
+		imshow("Actual", input_image_);//showing original video//
+		imshow("Detected_Object", adjusted_frame_);//showing detected object//
 		// actual_Image = actual_Image + track_motion;//drawing continuous line in original video frames//
 	}
 	waitKey(1); // waitKey() is required for `imshow` to actually show something
