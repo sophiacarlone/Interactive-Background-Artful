@@ -1,19 +1,50 @@
+#include <iostream>
+#include "include/tracker.h"
+#include <ostream>
+#include <glm/glm.hpp>
 #include "include/engine.h"
-// #include <random>
 
-using std::vector;
-using engine::Boid, engine::vec2;
+using namespace std;
+using namespace cv;
+using engine::vec2;
+
+#ifdef NDEBUG
+    const bool SHOW_TRACKER_WINDOWS = false;
+#else
+    const bool SHOW_TRACKER_WINDOWS = true;
+#endif
 
 const size_t N_BOIDS = 30;
 
-int main() {
-    float theta = 0.0;
+int main(int argc, char** argv) {
+    int vidnum;
+    cout << "Camera number: ";
+    cin >> vidnum;
+	//TODO: have openCV find best camera
+   
+    engine::Engine engine(N_BOIDS);
 
-    engine::Engine eng(N_BOIDS);
-    eng.run([&]() {
-        theta += 0.01;
-        if (theta > 2*M_PI) theta -= 2*M_PI;
-        vec2 attractor_pos = 0.7f * vec2(cos(theta), sin(theta));
-        eng.updateAttractor(attractor_pos);
+    tracker::Tracker tracker(vidnum, SHOW_TRACKER_WINDOWS); //object tracker
+    tracker.setObjectHSV();
+
+    engine.run([&] () {
+        cv::Point2d pos = tracker.getPos();
+        engine.updateAttractor(vec2(pos.x, pos.y));
     });
+    
+    return 0;
 }
+
+// #include <include/engine.h>
+// #include <include/tracker.h>
+// // ...
+
+// int main() {
+//   Tracker tracker();
+//   Engine engine();
+
+//   engine.run([&]() {
+//     vec2 pos = tracker.get_position();
+//     engine.update_position(pos);
+//   });
+// }
