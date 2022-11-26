@@ -1,8 +1,11 @@
 #ifndef ENGINE_IMPL_H
 #define ENGINE_IMPL_H
 
+// @todo draw the attractor on screen. Do we need a separate command buffer and vertex shader for that?
+//     We should just make the current vertex shader more generic. Not sure about command buffer though
 // @todo all this support query shit seems to significantly increase the startup time
 // @todo eventually implement the debug log system starting at page 52 of the Vulkan Tutorial PDF
+// @todo the cleanup function queue thing in vkguide.dev seems a lot nicer than the current system
 
 // glfw
 #define GLFW_INCLUDE_VULKAN // causes GLFW to load the vulkan header
@@ -20,7 +23,6 @@
 // C++ standard library
 #include <iostream>
 #include <stdexcept>
-#include <cstdlib> // EXIT_SUCCESS, EXIT_FAILURE
 #include <vector>
 #include <cstring> // strcmp
 #include <optional>
@@ -30,15 +32,17 @@
 #include<fstream>
 #include <array>
 #include <functional>
-
-using std::vector, std::cout, std::runtime_error;
+#include <random>
 
 namespace engine_impl {
 
+using std::vector, std::cout, std::runtime_error;
+using glm::vec2, glm::vec3;
+
 // vertex buffer gonna be AoS
 struct Vertex {
-    glm::vec2 pos;
-    glm::vec3 color;
+    vec2 pos;
+    vec3 color;
 
     // @todo ... what's a binding?
     static VkVertexInputBindingDescription getBindingDescription() {
@@ -46,7 +50,7 @@ struct Vertex {
 
         bd.binding = 0;
         bd.stride = sizeof(Vertex);
-        bd.inputRate = VK_VERTEX_INPUT_RATE_VERTEX; // not using instanced rendering
+        bd.inputRate = VK_VERTEX_INPUT_RATE_VERTEX; // I'm not sure what the other option does
 
         return bd;
     }
@@ -70,15 +74,33 @@ struct Vertex {
     }
 };
 
+// The compute shader expects this to look like a vec4, hence the alignment qualifiers (which would have been
+// needed anyway to conform to std140).
+struct Boid {
+    alignas(8) vec2 pos;
+    alignas(8) vec2 vel;
+};
+
+// Make sure this matches the definition in the shader.
+// alignas qualifiers are to ensure data is aligned the way the shader expects it to be (see `std140` in GLSL
+// or OpenGL spec).
+struct ComputePushConstants {
+    alignas(8) vec2 attractorPos;
+    alignas(4) uint32_t nBoids;
+};
+
 // CONSTANTS -------------------------------------------------------------------------------------------------
 
 // window dimensions
-const uint32_t WIDTH = 800;
-const uint32_t HEIGHT = 600;
+// @todo square because shit gets stretched out when rectangular. Gotta figure out how to do viewport stuff or
+// something.
+const uint32_t WIDTH  = 800;
+const uint32_t HEIGHT = 800;
 
 // shaders
 const char* VERT_SHADER_SPIRV_FILE = "vert.spv";
 const char* FRAG_SHADER_SPIRV_FILE = "frag.spv";
+const char* COMP_SHADER_SPIRV_FILE = "comp.spv";
 
 // extensions
 const vector<const char*> DEVICE_EXTENSIONS = {
@@ -96,11 +118,20 @@ const vector<const char*> VALIDATION_LAYERS = {
 #endif
 
 // vertices
-const vector<Vertex> VERTICES = {
-    { { 0.0f, -0.1f}, {1.0f, 0.0f, 0.0f} },
-    { { 0.1f,  0.1f}, {0.0f, 1.0f, 0.0f} },
-    { {-0.1f,  0.1f}, {0.0f, 0.0f, 1.0f} }
+const vector<Vertex> BOID_VERTS = {
+    { { 0.02f,  0.000f}, {1.0f, 0.0f, 0.0f} },
+    { {-0.02f,  0.010f}, {0.0f, 1.0f, 0.0f} },
+    { {-0.02f, -0.010f}, {0.0f, 0.0f, 1.0f} }
 };
+const vector<Vertex> ATTRACTOR_VERTS = {
+    { { 0.000f,  0.050f}, {1.0f, 0.0f, 0.0f} },
+    { { 0.025f, -0.043f}, {0.0f, 1.0f, 0.0f} },
+    { {-0.025f, -0.043f}, {0.0f, 0.0f, 1.0f} }
+};
+
+// @todo chosen arbitrarily; choose it properly and respect the device limits.
+// Make sure this matches the size specified in the shader.
+uint32_t COMPUTE_LOCAL_WORKGROUP_SIZE = 32;
 
 // -----------------------------------------------------------------------------------------------------------
 
@@ -114,10 +145,12 @@ struct QueueFamilyIndices {
     // graphics and present queues usually end up being the same, but it's not guaranteed
     std::optional<uint32_t> graphicsFamily; // capable of executing a graphics pipeline
     std::optional<uint32_t> presentFamily;  // capable of presenting to a surface
+    std::optional<uint32_t> computeFamily;  // capable of executing a compute pipeline
 
     bool isComplete() {
-        return graphicsFamily.has_value() && \
-               presentFamily.has_value();
+        return graphicsFamily.has_value() &&
+               presentFamily .has_value() &&
+               computeFamily .has_value();
     }
 };
 
@@ -129,17 +162,21 @@ struct SwapchainSupportDetails {
 
 class Engine {
 public:
+    Engine(size_t nBoids) : N_BOIDS_(nBoids) {}
     void run(std::function<void()> mainLoopCallback);
-    void update_position(glm::vec2 new_pos) { position_ = new_pos; }
+    void updateAttractor(vec2 newPos) { attractorPos_ = newPos; }
 
 private:
     GLFWwindow* window_;
     VkInstance instance_;
     VkSurfaceKHR surface_;
     VkPhysicalDevice physicalDevice_;
+    VkPhysicalDeviceProperties physicalDeviceProperties_; // save here for easier querying
     VkDevice device_;
+    // queues
     VkQueue graphicsQueue_;
     VkQueue presentQueue_;
+    VkQueue computeQueue_;
     // swapchain stuff
     VkSwapchainKHR swapchain_;
     vector<VkImage> swapchainImages_;
@@ -148,24 +185,38 @@ private:
     vector<VkImageView> swapchainImageViews_; // image views contain information on how to interpret an image
     // graphics pipeline stuff
     VkRenderPass renderPass_;
-    VkPipelineLayout pipelineLayout_;
+    VkPipelineLayout graphicsPipelineLayout_;
+    VkDescriptorSetLayout descriptorSetLayout_;
     VkPipeline graphicsPipeline_;
     vector<VkFramebuffer> swapchainFramebuffers_;
+    // compute pipeline stuff
+    VkPipelineLayout computePipelineLayout_;
+    VkPipeline computePipeline_;
     // command stuff
-    VkCommandPool commandPool_; // a command pool manages memory for command buffers
-    VkCommandBuffer commandBuffer_; // a command buffer containing commands is submitted to a device queue
+    VkCommandPool graphicsCmdPool_; // a command pool manages memory for command buffers
+    VkCommandBuffer graphicsCmdBuf_; // a command buffer containing commands is submitted to a device queue
+    VkCommandPool computeCmdPool_;
+    VkCommandBuffer computeCmdBuf_;
     // syncronization
     VkSemaphore imageAvailableSemaphore_;
     VkSemaphore renderFinishedSemaphore_;
+    VkSemaphore computeFinishedSemaphore_; // compute shader finished writing results
     VkFence inFlightFence_; // @todo rename? The meaning "GPU operations are in flight" isn't obvious
     // buffers
     // The VMA library provides an allocator to manage memory allocation for us; we create it once,
     // then use it for all allocation calls. It does things like keeping one big VkBufferMemory and using
     // offsets in it for individual buffers.
     VmaAllocator bufferAllocator_;
-    AllocatedBuffer vertexBuffer_;
+    AllocatedBuffer boidVertBuffer_;
+    AllocatedBuffer attractorVertBuffer_;
+    AllocatedBuffer boidPositionsBuffer_;
+    VkDescriptorPool descriptorPool_;
+    VkDescriptorSet descriptorSet_;
+    // DON'T remove the `const` qualifier without considering the fact that the boids buffer doesn't
+    // automatically get reallocated.
+    const size_t N_BOIDS_; // so we know how big the boids buffer should be and how many instances to draw
     // world state (i.e. states of objects in the virtual world)
-    glm::vec2 position_;
+    vec2 attractorPos_; // the thing attracting the boids
 
     // functions called by run()
     void initWindow();
@@ -187,12 +238,17 @@ private:
     void createSwapchain();
     void createSwapchainImageViews();
     void createRenderPass();
+    void createDescriptorSetLayout();
+    void createComputePipeline();
     void createGraphicsPipeline();
     void createFramebuffers();
-    void createCommandPool();
+    void createCommandPools();
     void createBufferAllocator();
-    void createVertexBuffer();
-    void allocateCommandBuffer();
+    void createVertexBuffers();
+    void createBoidsBuffer();
+    void createDescriptorPool();
+    void createDescriptorSet();
+    void allocateCommandBuffers();
     void createSyncObjects();
     void initWorldState();
 
@@ -200,6 +256,7 @@ private:
     void destroySwapchainImageViews();
     void destroyFramebuffers();
     void destroySyncObjects();
+    void destroyCommandPools();
 
     // choosing swapchain settings
     // chooseSwapSurfaceFormat and chooseSwapPresentMode are standalone functions
@@ -207,9 +264,13 @@ private:
 
     // misc
     VkShaderModule createShaderModule(const vector<char>& spirv);
-    void recordCommandBuffer(VkCommandBuffer, uint32_t imageIndex);
+    VkShaderModule shaderModuleFromSpirvFile(const std::string& fname);
+    void recordGraphicsCmdBuf(VkCommandBuffer, uint32_t imageIndex);
+    void recordComputeCmdBuf(VkCommandBuffer);
     void drawFrame();
+    void initBoidsBuffer();
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+    AllocatedBuffer createBuffer(size_t allocSize, VkBufferUsageFlags, VmaAllocationCreateInfo);
 };
 
 void Engine::run(std::function<void()> mainLoopCallback) {
@@ -217,6 +278,26 @@ void Engine::run(std::function<void()> mainLoopCallback) {
     initVulkan();
     mainLoop(mainLoopCallback);
     cleanup();
+}
+
+void Engine::initBoidsBuffer() {
+    // set up RNG stuff
+    std::random_device true_rng;
+    std::mt19937 generator(true_rng());
+    std::uniform_real_distribution<float> rng(-1.0, 1.0);
+
+    // Randomly distribute the boids. This looks significantly nicer than, e.g., distributing them linearly.
+    vector<Boid> boids(N_BOIDS_);
+    for (Boid& boid : boids) {
+        boid.pos = vec2(rng(generator), rng(generator));
+        boid.vel = vec2(0.0);
+    }
+
+    void* data;
+    vmaMapMemory(bufferAllocator_, boidPositionsBuffer_.allocation, &data);
+    memcpy(data, boids.data(), boids.size() * sizeof(Boid));
+    vmaUnmapMemory(bufferAllocator_, boidPositionsBuffer_.allocation);
+    // no need to flush the write, as long as the buffer has VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 }
 
 void Engine::drawFrame() {
@@ -250,28 +331,49 @@ void Engine::drawFrame() {
         device_, swapchain_, UINT64_MAX, imageAvailableSemaphore_, VK_NULL_HANDLE, &imageInd
     );
 
-    // record command buffer
-    vkResetCommandBuffer(commandBuffer_, 0);
-    recordCommandBuffer(commandBuffer_, imageInd);
+    // record command buffers
+    vkResetCommandBuffer(graphicsCmdBuf_, 0);
+    recordGraphicsCmdBuf(graphicsCmdBuf_, imageInd);
+    //
+    vkResetCommandBuffer(computeCmdBuf_, 0);
+    recordComputeCmdBuf(computeCmdBuf_);
 
-    // submit command buffer to queue
-    VkSubmitInfo sInfo{};
-    sInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    // don't write the color attachment output until the swapchain image is available
-    VkSemaphore waitSemaphores[] = {imageAvailableSemaphore_};
-    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    sInfo.waitSemaphoreCount = 1;
-    sInfo.pWaitSemaphores = waitSemaphores;
-    sInfo.pWaitDstStageMask = waitStages;
+    // submit compute command buffer
+    VkSubmitInfo compSubmitInfo{};
+    compSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    compSubmitInfo.waitSemaphoreCount = 0; // run as soon as possible after submitted
+    compSubmitInfo.pWaitSemaphores = nullptr;
+    compSubmitInfo.signalSemaphoreCount = 1;
+    compSubmitInfo.pSignalSemaphores = &computeFinishedSemaphore_;
+    compSubmitInfo.commandBufferCount = 1;
+    compSubmitInfo.pCommandBuffers = &computeCmdBuf_;
+    //
+    if (vkQueueSubmit(computeQueue_, 1, &compSubmitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
+        throw runtime_error("failed to submit draw command buffer");
+    }
+
+    // submit graphics command buffer
+    VkSubmitInfo graphicsSubmitInfo{};
+    graphicsSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    // Don't run the vertex shader until the compute shader finished writing the boids data to the uniform.
+    // Don't write the color attachment output until the swapchain image is available.
+    VkSemaphore waitSemaphores[] = {computeFinishedSemaphore_, imageAvailableSemaphore_};
+    VkPipelineStageFlags waitStages[] = {
+        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, // I think this is right?
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+    };
+    graphicsSubmitInfo.waitSemaphoreCount = 2;
+    graphicsSubmitInfo.pWaitSemaphores = waitSemaphores;
+    graphicsSubmitInfo.pWaitDstStageMask = waitStages;
     // cmd bufs to submit
-    sInfo.commandBufferCount = 1;
-    sInfo.pCommandBuffers = &commandBuffer_; // tutorial doesn't use a pointer, but I think that's a typo
+    graphicsSubmitInfo.commandBufferCount = 1;
+    graphicsSubmitInfo.pCommandBuffers = &graphicsCmdBuf_;
     // semaphores to signal after devices finishes executing the commands in the buffer
     VkSemaphore signalSemaphores[] = {renderFinishedSemaphore_};
-    sInfo.signalSemaphoreCount = 1;
-    sInfo.pSignalSemaphores = signalSemaphores;
-
-    if (vkQueueSubmit(graphicsQueue_, 1, &sInfo, inFlightFence_) != VK_SUCCESS) {
+    graphicsSubmitInfo.signalSemaphoreCount = 1;
+    graphicsSubmitInfo.pSignalSemaphores = signalSemaphores;
+    //
+    if (vkQueueSubmit(graphicsQueue_, 1, &graphicsSubmitInfo, inFlightFence_) != VK_SUCCESS) {
         throw runtime_error("failed to submit draw command buffer");
     }
 
@@ -303,21 +405,6 @@ void Engine::mainLoop(std::function<void()> callbackFunc) {
 
     // don't exit mainLoop until GPU operations complete; else we may begin cleanup prematurely
     vkDeviceWaitIdle(device_);
-}
-
-vector<char> readSpirvFile(const std::string& fname) {
-    using std::ios, std::ifstream;
-
-    // "ate" = start at end of file; it's a hack to get filesize
-    ifstream file(fname, ios::ate | ios::binary);
-    if (!file.is_open()) throw runtime_error("failed to open SPIRV file");
-    size_t fileSize = (size_t) file.tellg();
-
-    vector<char> buffer(fileSize);
-    file.seekg(0);
-    file.read(buffer.data(), fileSize);
-
-    return buffer;
 }
 
 void Engine::initWindow() {
@@ -418,6 +505,8 @@ void Engine::createInstance() {
     }
 }
 
+// @todo should we make this prefer to return a single family if there is one with all 3 capabilites? Dunno
+// if that has any advantages.
 QueueFamilyIndices Engine::findQueueFamilies(VkPhysicalDevice device) {
     QueueFamilyIndices indices;
     
@@ -426,9 +515,11 @@ QueueFamilyIndices Engine::findQueueFamilies(VkPhysicalDevice device) {
     vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
     
-    for (int i = 0; i < queueFamilyCount; i++) {
+    for (size_t i = 0; i < queueFamilyCount; i++) {
         // graphics capability
         if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) indices.graphicsFamily = i;
+        // compute capability
+        if (queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT ) indices.computeFamily  = i;
         // present capability
         VkBool32 presentSupport = false;
         vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface_, &presentSupport);
@@ -441,8 +532,7 @@ QueueFamilyIndices Engine::findQueueFamilies(VkPhysicalDevice device) {
 }
 
 // criteria:
-// support graphics queues
-// support present queues
+// support all required queue families
 // support all DEVICE_EXTENSIONS
 // physical device swapchain supports window surface
 bool Engine::isDeviceSuitable(VkPhysicalDevice physDevice) {
@@ -663,6 +753,21 @@ void Engine::destroySwapchainImageViews() {
     }
 }
 
+vector<char> readSpirvFile(const std::string& fname) {
+    using std::ios, std::ifstream;
+
+    // "ate" = start at end of file; it's a hack to get filesize
+    ifstream file(fname, ios::ate | ios::binary);
+    if (!file.is_open()) throw runtime_error("failed to open SPIRV file");
+    size_t fileSize = (size_t) file.tellg();
+
+    vector<char> buffer(fileSize);
+    file.seekg(0);
+    file.read(buffer.data(), fileSize);
+
+    return buffer;
+}
+
 VkShaderModule Engine::createShaderModule(const vector<char>& spirv) {
     VkShaderModuleCreateInfo cInfo{};
     cInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -672,6 +777,7 @@ VkShaderModule Engine::createShaderModule(const vector<char>& spirv) {
     // C++ is fucking cursed.
     // ... @todo what effect does the potential uninitialized data at the of the array have?
     // @todo PLEASE do this in a way that doesn't rely on the implementation
+    //     ... actually, this might be part of some C++ standard? Dunno
     cInfo.pCode = reinterpret_cast<const uint32_t*>(spirv.data());
 
     VkShaderModule shaderModule;
@@ -679,6 +785,9 @@ VkShaderModule Engine::createShaderModule(const vector<char>& spirv) {
         throw runtime_error("failed to create shader module");
     }
     return shaderModule;
+}
+VkShaderModule Engine::shaderModuleFromSpirvFile(const std::string& fname) {
+    return createShaderModule(readSpirvFile(fname));
 }
 
 void Engine::createRenderPass() {
@@ -737,14 +846,84 @@ void Engine::createRenderPass() {
     }
 }
 
-void Engine::createGraphicsPipeline() {
-    // read spirv code
-    vector<char> vertShaderCode = readSpirvFile(VERT_SHADER_SPIRV_FILE);
-    vector<char> fragShaderCode = readSpirvFile(FRAG_SHADER_SPIRV_FILE);
+// a descriptor points to a buffer and contains some information about the buffer
+// a descriptor set contains a bunch of descriptors (all of which get bound when the set is bound)
+// @todo more information here
+void Engine::createDescriptorSetLayout() {
+    // A binding is kind of a port in the descriptor set into which descriptors bind (I think).
+    // A binding has a sort of "shape"; different descriptors with a matching "shape" can be bound to it.
+    VkDescriptorSetLayoutBinding layoutBinding{};
+    layoutBinding.binding = 0; // must match binding in shader
+    layoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    layoutBinding.descriptorCount = 1; // this set contains one descriptor
+    // going to be accessed by compute (to compute the data) and vertex (to display it) shaders
+    layoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT; 
+    layoutBinding.pImmutableSamplers = nullptr; // we're not dealing with samplers for now
 
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &layoutBinding;
+    // @todo so... what exactly is a descriptor set layout?
+    if (vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &descriptorSetLayout_) != VK_SUCCESS) {
+        throw runtime_error("failed to create descriptor set layout");
+    }
+}
+
+void Engine::createComputePipeline() {
+    // set up shader
+    VkShaderModule compShaderModule = shaderModuleFromSpirvFile(COMP_SHADER_SPIRV_FILE);
+    //
+    VkPipelineShaderStageCreateInfo stageInfo{};
+    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stageInfo.module = compShaderModule;
+    stageInfo.pName = "main";
+
+    VkPipelineCreateFlags pipelineFlags{}; // didn't see any flags I wanted to set, leaving empty
+
+    // push constant info
+    VkPushConstantRange pcRange{};
+    pcRange.offset = 0;
+    pcRange.size = sizeof(ComputePushConstants); // this is what we'll be submitting for the push constants
+    pcRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    // pipeline layout
+    // @todo I still don't really understand pipeline layouts
+    VkPipelineLayoutCreateInfo plLayoutInfo{};
+    plLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    plLayoutInfo.setLayoutCount = 1; // descriptor set layouts
+    plLayoutInfo.pSetLayouts = &descriptorSetLayout_;
+    // @todo will need a push constant for boid attractor position
+    plLayoutInfo.pushConstantRangeCount = 1;
+    plLayoutInfo.pPushConstantRanges = &pcRange;
+    //
+    if (vkCreatePipelineLayout(device_, &plLayoutInfo, nullptr, &computePipelineLayout_) != VK_SUCCESS) {
+        throw runtime_error("failed to create compute pipeline layout");
+    }
+
+    VkComputePipelineCreateInfo plInfo{};
+    plInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    plInfo.flags = pipelineFlags;
+    plInfo.stage = stageInfo;
+    plInfo.layout = computePipelineLayout_;
+    // not deriving this from another pipeline
+    plInfo.basePipelineHandle = VK_NULL_HANDLE;
+    plInfo.basePipelineIndex = -1;
+
+    if (
+        vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &plInfo, nullptr, &computePipeline_)
+        != VK_SUCCESS
+    ) throw runtime_error("failed to create compute pipeline");
+
+    // don't need shader module after linking it; clean it up
+    vkDestroyShaderModule(device_, compShaderModule, nullptr);
+}
+
+void Engine::createGraphicsPipeline() {
     // create shader modules
-    VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
-    VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+    VkShaderModule vertShaderModule = shaderModuleFromSpirvFile(VERT_SHADER_SPIRV_FILE);
+    VkShaderModule fragShaderModule = shaderModuleFromSpirvFile(FRAG_SHADER_SPIRV_FILE);
 
     // create programmable pipeline stages -------------------------------------------------------------------
 
@@ -755,7 +934,8 @@ void Engine::createGraphicsPipeline() {
     // specify entrypoint; we could have multiple potential entrypoints in the shader, so we pick one here
     vertShaderStageInfo.pName = "main";
     // note: ...Info.pSPecializationInfo can be used to specify constants used in the shader at pipeline
-    // creation time, which could be more efficient than pushing them during the render loop
+    // creation time, which could be more efficient than pushing them during the render loop.
+    // @todo we should probably use this to specify the local workgroup size in the compute shader.
 
     VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
     fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -825,7 +1005,8 @@ void Engine::createGraphicsPipeline() {
     rastInfo.polygonMode = VK_POLYGON_MODE_FILL; // fill polygons / only draw edges / only draw vertices
     rastInfo.lineWidth = 1.0f; // width of lines (measured in number of fragments (i.e. "pixels"))
     // whether to cull "front-facing" or "back-facing" faces, or none at all
-    rastInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+    // rastInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+    rastInfo.cullMode = VK_CULL_MODE_NONE; // @debug
     // defines direction a face "faces" by the order of vertices defining the polygon
     rastInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
     rastInfo.depthBiasEnable = VK_FALSE; // whether to modify depth values during rasterization
@@ -892,13 +1073,13 @@ void Engine::createGraphicsPipeline() {
     // pipeline layout (something something descriptors, uniforms, push constants)
     VkPipelineLayoutCreateInfo plLayoutInfo{};
     plLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    plLayoutInfo.setLayoutCount = 0;
-    plLayoutInfo.pSetLayouts = nullptr;
+    plLayoutInfo.setLayoutCount = 1; // descriptor set layouts
+    plLayoutInfo.pSetLayouts = &descriptorSetLayout_;
     plLayoutInfo.pushConstantRangeCount = 1;
     plLayoutInfo.pPushConstantRanges = &pcRange;
 
-    if (vkCreatePipelineLayout(device_, &plLayoutInfo, nullptr, &pipelineLayout_) != VK_SUCCESS) {
-        throw runtime_error("failed to create pipeline layout");
+    if (vkCreatePipelineLayout(device_, &plLayoutInfo, nullptr, &graphicsPipelineLayout_) != VK_SUCCESS) {
+        throw runtime_error("failed to create graphics pipeline layout");
     }
 
     // finally, create the fucking pipeline
@@ -914,14 +1095,14 @@ void Engine::createGraphicsPipeline() {
     plInfo.pDepthStencilState = nullptr; // not using stencil (yet?)
     plInfo.pColorBlendState = &cbInfo;
     plInfo.pDynamicState = nullptr;
-    plInfo.layout = pipelineLayout_;
+    plInfo.layout = graphicsPipelineLayout_;
     plInfo.renderPass = renderPass_;
     plInfo.subpass = 0;
     // it's less expensive to derive from an existing pipeline if functionality is similar
     // not doing that here since this is the first pipeline we're creating
     plInfo.basePipelineHandle = VK_NULL_HANDLE;
     plInfo.basePipelineIndex = -1;
-
+    //
     // second param is an optional pipeline cache, which can speed up multiple pipeline creation calls
     if (
         vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &plInfo, nullptr, &graphicsPipeline_)
@@ -959,19 +1140,34 @@ void Engine::destroyFramebuffers() {
     for (VkFramebuffer fb : swapchainFramebuffers_) vkDestroyFramebuffer(device_, fb, nullptr);
 }
 
-void Engine::createCommandPool() {
+void Engine::createCommandPools() {
     QueueFamilyIndices qfInds = findQueueFamilies(physicalDevice_); // @todo doing this yet again
 
-    VkCommandPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    // graphics command pool
+    VkCommandPoolCreateInfo graphicsPoolInfo{};
+    graphicsPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     // allow rerecording of individual buffers (instead of all at once); we'll be doing so every frame
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    graphicsPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     // the queue family to which command buffers will be submitted
-    poolInfo.queueFamilyIndex = qfInds.graphicsFamily.value(); // because we're going to submit draw commands
-
-    if (vkCreateCommandPool(device_, &poolInfo, nullptr, &commandPool_) != VK_SUCCESS) {
+    graphicsPoolInfo.queueFamilyIndex = qfInds.graphicsFamily.value(); // because we're going to submit draw commands
+    //
+    if (vkCreateCommandPool(device_, &graphicsPoolInfo, nullptr, &graphicsCmdPool_) != VK_SUCCESS) {
         throw runtime_error("failed to create command pool");
     }
+
+    // compute command pool
+    VkCommandPoolCreateInfo compPoolInfo{};
+    compPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    compPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    compPoolInfo.queueFamilyIndex = qfInds.computeFamily.value();
+    //
+    if (vkCreateCommandPool(device_, &compPoolInfo, nullptr, &computeCmdPool_) != VK_SUCCESS) {
+        throw runtime_error("failed to create command pool");
+    }
+}
+void Engine::destroyCommandPools() {
+    vkDestroyCommandPool(device_, computeCmdPool_,  nullptr);
+    vkDestroyCommandPool(device_, graphicsCmdPool_, nullptr);
 }
 
 // typeFilter is a bitmask specifying acceptable memory types
@@ -1000,66 +1196,142 @@ void Engine::createBufferAllocator() {
     }
 }
 
-void Engine::createVertexBuffer() {
-    // buffer info
-    VkBufferCreateInfo bufInfo{};
-    bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufInfo.size = sizeof(VERTICES[0]) * VERTICES.size();
-    bufInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE; // only used by graphics queue
-
-    // allocation info
+void Engine::createVertexBuffers() {
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-    // we'll be using memcpy to write to the buffer, so SEQUENTIAL_WRITE_BIT is appropriate
-    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-    // @todo not sure if I need to set these two; Vulkan Tutorial sets them, but isn't using VMA.
+    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT; // we'll use memcpy
     // HOST_COHERENT_BIT makes it so that we don't need to explicitly flush writes to the mapped memory
-    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-    // create the VkBuffer, allocate the VkDeviceMemory, and bind them together
-    // these are normally separate steps, but VMA handles all of them in one call
-    if (
-        vmaCreateBuffer(
-            bufferAllocator_, &bufInfo, &allocInfo, &vertexBuffer_.buffer, &vertexBuffer_.allocation, nullptr
-        ) != VK_SUCCESS
-    ) throw runtime_error("allocator failed to allocate and bind vertex buffer");
-
+    // create boids vertex buffer
+    // @todo this doesn't set the sharing mode; setting it to EXCLUSIVE should be optimal
+    boidVertBuffer_ = createBuffer(
+        sizeof(Vertex) * BOID_VERTS.size(), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, allocInfo
+    );
     // copy vertices over to buffer
-    void* data; // becomes a pointer to the mapped memory
-    if (vmaMapMemory(bufferAllocator_, vertexBuffer_.allocation, &data) != VK_SUCCESS) {
-        throw runtime_error("failed to map vertex buffer memory");
+    void* mappedBoidVertBuf; // becomes a pointer to the mapped memory
+    if (vmaMapMemory(bufferAllocator_, boidVertBuffer_.allocation, &mappedBoidVertBuf) != VK_SUCCESS) {
+        throw runtime_error("failed to map boids buffer memory");
     }
-    memcpy(data, VERTICES.data(), bufInfo.size);
+    memcpy(mappedBoidVertBuf, BOID_VERTS.data(), sizeof(Vertex) * BOID_VERTS.size());
     // don't need to explicitly flush writes to the memory here as long as we have set
     // VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    vmaUnmapMemory(bufferAllocator_, vertexBuffer_.allocation);
+    vmaUnmapMemory(bufferAllocator_, boidVertBuffer_.allocation);
     // at this point, the driver knows about the writes but the memory may not have been copied to the GPU
     // yet; but Vulkan guarantees it will have been completely copied before the next call to vkQueueSubmit
     // goes through
+
+    // same for attractor vertex buffer
+    attractorVertBuffer_ = createBuffer(
+        sizeof(Vertex) * ATTRACTOR_VERTS.size(), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, allocInfo
+    );
+    void* mappedAttraVertBuf;
+    if (vmaMapMemory(bufferAllocator_, attractorVertBuffer_.allocation, &mappedAttraVertBuf) != VK_SUCCESS) {
+        throw runtime_error("failed to map attractor buffer memory");
+    }
+    memcpy(mappedAttraVertBuf, ATTRACTOR_VERTS.data(), sizeof(Vertex) * ATTRACTOR_VERTS.size());
+    vmaUnmapMemory(bufferAllocator_, attractorVertBuffer_.allocation);
 }
 
-void Engine::allocateCommandBuffer() {
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool = commandPool_;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; // secondary buffers can be built from primary ones?
-    allocInfo.commandBufferCount = 1;
+void Engine::createBoidsBuffer() {
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    // since we're promising sequential writes only, we should only use memcpy to write to it!
+    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+    // @todo use a staging buffer for memory transfer instead of making this one host visible
+    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-    if (vkAllocateCommandBuffers(device_, &allocInfo, &commandBuffer_) != VK_SUCCESS) {
+    // verify that it doesn't require too much memory
+    size_t max_n_boids = physicalDeviceProperties_.limits.maxStorageBufferRange / sizeof(Boid);
+    if (N_BOIDS_ > max_n_boids) {
+        throw runtime_error("exceeded max possible number of boids (" + std::to_string(max_n_boids) + ")");
+    }
+
+    boidPositionsBuffer_ =
+        createBuffer(N_BOIDS_*sizeof(Boid), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, allocInfo);
+}
+
+void Engine::createDescriptorPool() {
+    VkDescriptorPoolSize poolSize{};
+    poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    poolSize.descriptorCount = 1; // @todo if we did double-buffering or something, this would need to change
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.maxSets = 1; // @todo if double-buffering, this should change
+
+    if (vkCreateDescriptorPool(device_, &poolInfo, nullptr, &descriptorPool_) != VK_SUCCESS) {
+        throw runtime_error("failed to create descriptor pool");
+    }
+}
+
+void Engine::createDescriptorSet() {
+    // allocate
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = descriptorPool_;
+    allocInfo.descriptorSetCount = 1; // @todo if double-buffering, this should change
+    allocInfo.pSetLayouts = &descriptorSetLayout_;
+    //
+    if (vkAllocateDescriptorSets(device_, &allocInfo, &descriptorSet_) != VK_SUCCESS) {
+        throw runtime_error("failed to allocate descriptor set");
+    }
+
+    // configure
+    VkDescriptorBufferInfo bufInfo{}; // info for a descriptor describing a buffer
+    bufInfo.buffer = boidPositionsBuffer_.buffer;
+    bufInfo.offset = 0;
+    bufInfo.range = N_BOIDS_ * sizeof(Boid);
+    //
+    VkWriteDescriptorSet descWrite{};
+    descWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descWrite.dstSet = descriptorSet_;
+    descWrite.dstBinding = 0; // make sure this matches
+    descWrite.dstArrayElement = 0; // something something descriptors can be arrays but we're not doing that
+    descWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    descWrite.descriptorCount = 1;
+    descWrite.pBufferInfo = &bufInfo;
+    // our descriptor is for a buffer; don't need these two
+    descWrite.pImageInfo = nullptr;
+    descWrite.pTexelBufferView = nullptr;
+    //
+    vkUpdateDescriptorSets(device_, 1, &descWrite, 0, nullptr);
+}
+
+void Engine::allocateCommandBuffers() {
+    // graphics
+    VkCommandBufferAllocateInfo graphicsAllocInfo{};
+    graphicsAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    graphicsAllocInfo.commandPool = graphicsCmdPool_;
+    graphicsAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    graphicsAllocInfo.commandBufferCount = 1;
+    //
+    if (vkAllocateCommandBuffers(device_, &graphicsAllocInfo, &graphicsCmdBuf_) != VK_SUCCESS) {
+        throw runtime_error("failed to allocate command buffer");
+    }
+
+    // compute
+    VkCommandBufferAllocateInfo compAllocInfo{};
+    compAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    compAllocInfo.commandPool = computeCmdPool_;
+    compAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    compAllocInfo.commandBufferCount = 1;
+    //
+    if (vkAllocateCommandBuffers(device_, &compAllocInfo, &computeCmdBuf_) != VK_SUCCESS) {
         throw runtime_error("failed to allocate command buffer");
     }
 }
 
-void Engine::recordCommandBuffer(VkCommandBuffer cbuf, uint32_t imageIndex) {
+void Engine::recordGraphicsCmdBuf(VkCommandBuffer cbuf, uint32_t imageIndex) {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = 0; // none of the flags needed yet
     beginInfo.pInheritanceInfo = nullptr; // only relevant for secondary command bufs
 
     if (vkBeginCommandBuffer(cbuf, &beginInfo) != VK_SUCCESS) {
-        throw runtime_error("failed to begin recording command buffer");
+        throw runtime_error("failed to begin recording graphics command buffer");
     }
 
     // set up info needed for the "begin render pass" command
@@ -1079,18 +1351,47 @@ void Engine::recordCommandBuffer(VkCommandBuffer cbuf, uint32_t imageIndex) {
     vkCmdBeginRenderPass(cbuf, &rpbInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(cbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline_);
     // bind vertex buffer
-    VkBuffer vertexBuffers[] = {vertexBuffer_.buffer};
+    VkBuffer vertexBuffers[] = {boidVertBuffer_.buffer};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cbuf, 0, 1, vertexBuffers, offsets);
-    glm::mat4 posTransform = glm::translate(glm::identity<glm::mat4>(), glm::vec3(position_, 0.0));
+    glm::mat4 posTransform = glm::translate(glm::identity<glm::mat4>(), vec3(attractorPos_, 0.0));
     vkCmdPushConstants(
-        cbuf, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(posTransform), &posTransform
+        cbuf, graphicsPipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(posTransform), &posTransform
     );
-    // instanceCount = 1 because we're not doing instancing
-    vkCmdDraw(cbuf, static_cast<uint32_t>(VERTICES.size()), 1, 0, 0);
+    vkCmdBindDescriptorSets( // bind the boids uniform buffer descriptor
+        cbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr
+    );
+    vkCmdDraw(cbuf, static_cast<uint32_t>(BOID_VERTS.size()), N_BOIDS_, 0, 0);
     vkCmdEndRenderPass(cbuf);
 
-    if (vkEndCommandBuffer(cbuf) != VK_SUCCESS) throw runtime_error("failed to end command buffer recording");
+    if (vkEndCommandBuffer(cbuf) != VK_SUCCESS) {
+        throw runtime_error("failed to end graphics command buffer recording");
+    }
+}
+void Engine::recordComputeCmdBuf(VkCommandBuffer cbuf) {
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = 0;
+    beginInfo.pInheritanceInfo = nullptr;
+    
+    if (vkBeginCommandBuffer(cbuf, &beginInfo) != VK_SUCCESS) {
+        throw runtime_error("failed to begin recording compute command buffer");
+    }
+
+    vkCmdBindPipeline(cbuf, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_);
+    ComputePushConstants pc = { attractorPos_, static_cast<uint32_t>(N_BOIDS_) };
+    vkCmdPushConstants(
+        cbuf, computePipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &pc
+    );
+    vkCmdBindDescriptorSets( // bind the boids uniform buffer descriptor
+        cbuf, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr
+    );
+    uint32_t n_local_workgroups = ceil((float)N_BOIDS_ / (float)COMPUTE_LOCAL_WORKGROUP_SIZE);
+    vkCmdDispatch(cbuf, n_local_workgroups, 1, 1);
+
+    if (vkEndCommandBuffer(cbuf) != VK_SUCCESS) {
+        throw runtime_error("failed to end compute command buffer recording");
+    }
 }
 
 void Engine::createSyncObjects() {
@@ -1104,22 +1405,24 @@ void Engine::createSyncObjects() {
     // the first frame
     fInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    VkResult r1 = vkCreateSemaphore(device_, &sInfo, nullptr, &imageAvailableSemaphore_);
-    VkResult r2 = vkCreateSemaphore(device_, &sInfo, nullptr, &renderFinishedSemaphore_);
-    VkResult r3 = vkCreateFence(    device_, &fInfo, nullptr, &inFlightFence_);
-    if (r1 != VK_SUCCESS || r2 != VK_SUCCESS || r3 != VK_SUCCESS) {
+    VkResult r1 = vkCreateSemaphore(device_, &sInfo, nullptr, &imageAvailableSemaphore_ );
+    VkResult r2 = vkCreateSemaphore(device_, &sInfo, nullptr, &renderFinishedSemaphore_ );
+    VkResult r3 = vkCreateSemaphore(device_, &sInfo, nullptr, &computeFinishedSemaphore_);
+    VkResult r4 = vkCreateFence(    device_, &fInfo, nullptr, &inFlightFence_           );
+    if (r1 != VK_SUCCESS || r2 != VK_SUCCESS || r3 != VK_SUCCESS || r4 != VK_SUCCESS) {
         throw runtime_error("failed to create sync objects");
     }
 }
 void Engine::destroySyncObjects() {
-    vkDestroySemaphore(device_, imageAvailableSemaphore_, nullptr);
-    vkDestroySemaphore(device_, renderFinishedSemaphore_, nullptr);
-    vkDestroyFence(    device_, inFlightFence_,           nullptr);
+    vkDestroySemaphore(device_, imageAvailableSemaphore_ , nullptr);
+    vkDestroySemaphore(device_, renderFinishedSemaphore_ , nullptr);
+    vkDestroySemaphore(device_, computeFinishedSemaphore_, nullptr);
+    vkDestroyFence(    device_, inFlightFence_,            nullptr);
 }
 
 void Engine::initWorldState() {
-    // initialize position transform as the identity transform of a 2D point
-    position_ = glm::vec2(0.0);
+    attractorPos_ = vec2(0.0);
+    initBoidsBuffer();
 }
 
 void Engine::selectPhysicalDevice() {
@@ -1142,11 +1445,12 @@ void Engine::selectPhysicalDevice() {
     if (*bestRatingIterator == 0) throw runtime_error("found no suitable physical device");
     physicalDevice_ = devices[bestRatingIterator - deviceRatings.begin()];
 
+    // save device properties for easy querying
+    vkGetPhysicalDeviceProperties(physicalDevice_, &physicalDeviceProperties_);
+
     // print chosen device
-    VkPhysicalDeviceProperties deviceProperties;
-    vkGetPhysicalDeviceProperties(physicalDevice_, &deviceProperties);
-    #ifdef DEBUG
-        cout << "chose " << deviceProperties.deviceName << '\n';
+    #ifndef NDEBUG
+        cout << "chose " << physicalDeviceProperties_.deviceName << '\n';
     #endif
 }
 
@@ -1157,8 +1461,10 @@ void Engine::createLogicalDeviceAndQueues() {
     QueueFamilyIndices indices = findQueueFamilies(physicalDevice_);
     // the (e.g.) present and graphics queue families might end up being the same family, in which case we
     // don't want to give vkCreateDevice two queue creation infos when we only need one queue
-    std::set<uint32_t> uniqueQueueFamilies = {indices.graphicsFamily.value(), indices.presentFamily.value()};
-    // Vulkan requires priority specification regardless of how many queues there are
+    std::set<uint32_t> uniqueQueueFamilies = {
+        indices.graphicsFamily.value(), indices.presentFamily.value(), indices.computeFamily.value()
+    };
+    // Vulkan requires priority specification regardless of how many queues there are; using 1.0 arbitrarily
     float queuePriority = 1.0f;
     // for each unique queue family, make an info for creation of a queue from the family
     vector<VkDeviceQueueCreateInfo> queueCreateInfos;
@@ -1196,8 +1502,29 @@ void Engine::createLogicalDeviceAndQueues() {
     // 3rd parameter is the index of queue to get from the family; since we only made 1 queue per family, the
     // index is 0.
     vkGetDeviceQueue(device_, indices.graphicsFamily.value(), 0, &graphicsQueue_);
-    vkGetDeviceQueue(device_, indices.presentFamily.value(),  0, &presentQueue_ );
+    vkGetDeviceQueue(device_, indices.presentFamily .value(), 0, &presentQueue_ );
+    vkGetDeviceQueue(device_, indices.computeFamily .value(), 0, &computeQueue_ );
 }
+
+AllocatedBuffer Engine::createBuffer(
+    size_t allocSize, VkBufferUsageFlags usage, VmaAllocationCreateInfo allocInfo
+) {
+    VkBufferCreateInfo bufInfo{};
+    bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufInfo.pNext = nullptr;
+    bufInfo.size = allocSize;
+    bufInfo.usage = usage;
+    // @todo sharing mode?
+
+    AllocatedBuffer buf;
+    if (
+        vmaCreateBuffer(bufferAllocator_, &bufInfo, &allocInfo, &buf.buffer, &buf.allocation, nullptr)
+        != VK_SUCCESS
+    ) throw runtime_error("failed to create buffer");
+
+    return buf;
+}
+
 
 void Engine::initVulkan() {
     createInstance(); cout << "created instance\n";
@@ -1208,12 +1535,17 @@ void Engine::initVulkan() {
     createSwapchain();              cout << "created swapchain\n";
     createSwapchainImageViews();    cout << "created swapchain image views\n";
     createRenderPass();             cout << "created render pass\n";
+    createDescriptorSetLayout();    cout << "created descriptor set layout\n";
+    createComputePipeline();        cout << "created compute pipeline\n";
     createGraphicsPipeline();       cout << "created graphics pipeline\n";
     createFramebuffers();           cout << "created framebuffers\n";
-    createCommandPool();            cout << "created command pool\n";
+    createCommandPools();           cout << "created command pool\n";
     createBufferAllocator();        cout << "created buffer allocator\n";
-    createVertexBuffer();           cout << "created vertex buffer\n";
-    allocateCommandBuffer();        cout << "allocated command buffer\n";
+    createVertexBuffers();          cout << "created vertex buffer\n";
+    createBoidsBuffer();            cout << "created boid positions buffer\n";
+    createDescriptorPool();         cout << "created descriptor pool\n";
+    createDescriptorSet();          cout << "created descriptor set\n";
+    allocateCommandBuffers();       cout << "allocated command buffer\n";
     createSyncObjects();            cout << "created sync objects\n";
     initWorldState();               cout << "initialized push constants\n";
 }
@@ -1221,12 +1553,18 @@ void Engine::initVulkan() {
 void Engine::cleanup() {
     // destroy things in reverse order of creation
     destroySyncObjects();
-    vmaDestroyBuffer(bufferAllocator_, vertexBuffer_.buffer, vertexBuffer_.allocation);
+    vkDestroyDescriptorPool(device_, descriptorPool_, nullptr); // also frees descriptor sets
+    vmaDestroyBuffer(bufferAllocator_, boidPositionsBuffer_.buffer, boidPositionsBuffer_.allocation);
+    vmaDestroyBuffer(bufferAllocator_, attractorVertBuffer_.buffer, attractorVertBuffer_.allocation);
+    vmaDestroyBuffer(bufferAllocator_, boidVertBuffer_.buffer     , boidVertBuffer_.allocation     );
     vmaDestroyAllocator(bufferAllocator_);
-    vkDestroyCommandPool(device_, commandPool_, nullptr);
+    destroyCommandPools();
     destroyFramebuffers();
     vkDestroyPipeline(device_, graphicsPipeline_, nullptr);
-    vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
+    vkDestroyPipeline(device_, computePipeline_ , nullptr);
+    vkDestroyPipelineLayout(device_, graphicsPipelineLayout_, nullptr);
+    vkDestroyPipelineLayout(device_, computePipelineLayout_ , nullptr);
+    vkDestroyDescriptorSetLayout(device_, descriptorSetLayout_, nullptr);
     vkDestroyRenderPass(device_, renderPass_, nullptr);
     destroySwapchainImageViews();
     vkDestroySwapchainKHR(device_, swapchain_, nullptr);

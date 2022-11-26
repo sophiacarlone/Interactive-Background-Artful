@@ -7,10 +7,14 @@
 
 namespace engine {
 
+using engine_impl::Boid;
+using glm::vec2;
+
 class Engine {
 public:
-    void run(std::function<void()> mainLoopCallback) { engine_.run(mainLoopCallback); }
-    void update_position(glm::vec2 new_position) { engine_.update_position(new_position); }
+    Engine(size_t nBoids) : engine_(nBoids) {}
+    void run(std::function<void()> mainLoopCallback = [](){}) { engine_.run(mainLoopCallback); }
+    void updateAttractor(vec2 newPosition) { engine_.updateAttractor(newPosition); }
 
 private:
     engine_impl::Engine engine_;

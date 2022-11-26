@@ -1,22 +1,16 @@
 #ifndef TRACKER_H
 #define TRACKER_H
 
-#include <bits/types/time_t.h>
-#include <cstddef>
-#include <iostream>
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
-#include <ostream>
 
 namespace tracker {
 
+using cv::Point2d;
+
 class Tracker{
     private:
-        cv::VideoCapture vid_;
-        bool show_windows_;
-        int camera_size_vertical_;
-        int camera_size_horizontal_;
         int Hue_Low_;//lower range of hue//
         int Hue_high_;//upper range of hue//
         int Sat_Low_;//lower range of saturation//
@@ -27,12 +21,13 @@ class Tracker{
         float vertical_Last_ = -1;//initial vertical position//
         float posX_, posY_;
         // float velocityX_, velocityY_;
-        
-    public:
-        Tracker(int vidnum, bool showWindows);
-        void setObjectHSV();
 
-        cv::Point2d getPos();
+    public:
+        Tracker();
+        void setObjectHSV();
+        void run(int vidnum, bool showWindows);
+
+        Point2d getPos() { return Point2d(posX_, posY_); }
         // float getVelocityX()  {return velocityX_;}
         // float getVelocityY()  {return velocityY_;}
 

@@ -1,0 +1,105 @@
+#version 450
+
+// There's no `location` for `in`; it's just used to specify the local workgroup dimensions.
+// @todo local workgroup size chosen arbitrarily; choose it properly (maybe programmatically determine on host
+// and pass in via... a specialization constant or something?)
+layout(local_size_x = 32) in;
+
+// the boids buffer
+layout(binding = 0, std140) buffer Boids {
+    // We're representing a `struct Boid { vec2 pos; vec2 vel; }` as a vec4, where
+    // boid.xy is the pos and boid.zw is the vel.
+    // This allows us to compute some values (like means) simultaneously for both pos and vel.
+    vec4 boids[];
+};
+layout(push_constant, std140) uniform PushConsts {
+    vec2 ATTRACTOR_POS;
+    uint N_BOIDS;
+};
+
+// helpers to avoid branching. Never actually benchmarked to see if this was better
+vec2 whenLessThan(   vec2 a, vec2 b) { return max(sign(b - a), 0.0); }
+vec2 whenGreaterThan(vec2 a, vec2 b) { return max(sign(a - b), 0.0); }
+// If divisor is 0, returns v unmodified.
+vec2 divideIfNotZero(vec2 v, float divisor) {
+    return v / (divisor + float(divisor == 0.0));
+}
+// `normalize` function that maps the 0 vector to itself.
+vec2 normalizeIfNotZero(vec2 v) {
+    float len = length(v);
+    return divideIfNotZero(v, len);
+}
+
+const float COLLISION_AVOIDANCE_RADIUS = 0.1; // @todo make the radius scale with speed?
+const float SPEED_MAX = 1.0;
+const float SPEED_MIN = 0.1;
+const float DT = 0.01; // time step
+// weight factors; modify to increase or decrease priority of different factors
+const float WEIGHT_SEPARATION = 0.02;
+const float WEIGHT_COHESION   = 0.50;
+const float WEIGHT_ALIGNMENT  = 1.00;
+const float WEIGHT_ATTRACTION = 1.00;
+//
+void main() {
+    uint boidInd = gl_GlobalInvocationID.x;
+    if (boidInd >= N_BOIDS) return; // if you don't have a boid to update, return immediately
+    vec4 boid = boids[boidInd];
+
+    float reciprocalNOtherBoids = 1.0 / float(N_BOIDS - 1);
+
+    // Compute acceleration due to separation
+    vec2 accSeparation = vec2(0.0);
+    vec4 sumPos_sumVel = vec4(0.0); // we'll also compute this for use in Cohesion and Aligment later
+    for (int i = 0; i < N_BOIDS; ++i) {
+        vec4 otherBoid = boids[i];
+        // This sum could be computed using parallel reduction, but we need to iterate over the entire array
+        // for the separation computation anyway, so there probably isn't much point.
+        sumPos_sumVel += otherBoid;
+
+        vec2 disp = boid.xy - otherBoid.xy;
+        float dist = length(disp);
+        // Accelerate away from the other boid (with acc proportional to 1/dist) iff all of:
+        //     1. it's too close to us
+        //     2. it isn't us
+        //     3. its distance from us isn't 0 (to avoid division by 0)
+        accSeparation += mix(
+            vec2(0.0),
+            disp / (dist * dist),
+            bvec2(dist < COLLISION_AVOIDANCE_RADIUS && i != boidInd && dist != 0.0)
+        );
+    }
+    // Compute acceleration due to cohesion  (meanPos - ourPos)
+    // Compute acceleration due to alignment (meanVel - ourVel)
+    vec4 meanPos_meanVel = (sumPos_sumVel - boid) * reciprocalNOtherBoids; // mean values of all other boids
+    vec4 accCohesion_accAlignment = meanPos_meanVel - boid;
+
+    // Compute acceleration due to attraction to an object (e.g. the object is bread and the birds want it)
+    vec2 attractorDisp = ATTRACTOR_POS - boid.xy;
+    // @todo Not sure why I decided to normalize, but it looks cool and reduces the magnitude of overshooting.
+    vec2 accAttraction = normalizeIfNotZero(attractorDisp);
+
+    // Compute new boid values due to net acceleration
+    vec2 netAcc =
+        WEIGHT_COHESION   * accCohesion_accAlignment.xy + 
+        WEIGHT_SEPARATION * accSeparation               + 
+        WEIGHT_ALIGNMENT  * accCohesion_accAlignment.zw +
+        WEIGHT_ATTRACTION * accAttraction;
+    // @optimize under what conditions is this compiled to an `fma` instruction?
+    boid.zw += DT*netAcc;
+    // enforce speed limits
+    float speed = length(boid.zw);
+    boid.zw = divideIfNotZero(boid.zw, speed) * clamp(speed, SPEED_MIN, SPEED_MAX);
+    boid.xy += DT*boid.zw;
+    // Wrap around if crossing window border. // @todo disable this behavior?
+    boid.xy +=
+         2.0 * whenLessThan(   boid.xy, vec2(-1.0))
+        -2.0 * whenGreaterThan(boid.xy, vec2( 1.0));
+
+    // Since the boid computations depend on the positions and velocities of other boids, we should wait for
+    // every invocation to finish computing their boids before we modify the boids buffer.
+    // @optimize could we put this barrier earlier? We just need to be past the last point where the shader
+    // fetches data from the boids buffer. Maybe use some kind of memory access barrier?
+    barrier();
+    // Finally, update the boids buffer with the new values.
+    boids[boidInd] = boid;
+}
