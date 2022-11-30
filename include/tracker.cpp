@@ -28,7 +28,7 @@ Tracker::Tracker() {
 //TODO: can change parameters to detect other object. Wanted to keep defaults and specifics separate for now
 void Tracker::setObjectHSV(){
     if (!DETECT_OBJECT) {
-        Hue_Low_  = 36;//lower range of hue//
+        Hue_Low_  = 80;//lower range of hue//
         Hue_high_ = 91;//upper range of hue//
         Sat_Low_  = 51;//lower range of saturation//
         Sat_high_ = 255;//upper range of saturation//
@@ -37,12 +37,12 @@ void Tracker::setObjectHSV(){
    }
    
 	/*USE FOR OBJECT DETECTING INFORMATION*/
-	//    createTrackbar("LowH", "Adjust", &Hue_Low, 179);//track-bar for min hue//
-	//    createTrackbar("HighH","Adjust", &Hue_high, 179);//track-bar for max hue//
-	//    createTrackbar("LowS", "Adjust", &Sat_Low, 255);//track-bar for min saturation//
-	//    createTrackbar("HighS", "Adjust", &Sat_high, 255);// track-bar for max saturation//
-	//    createTrackbar("LowV", "Adjust", &Val_Low,255);//track-bar for min value//
-	//    createTrackbar("HighV", "Adjust", &Val_high, 255);// track - bar for max value//  
+	//    createTrackbar("LowH", "Adjust", &Hue_Low_, 179);//track-bar for min hue//
+	//    createTrackbar("HighH","Adjust", &Hue_high_, 179);//track-bar for max hue//
+	//    createTrackbar("LowS", "Adjust", &Sat_Low_, 255);//track-bar for min saturation//
+	//    createTrackbar("HighS", "Adjust", &Sat_high_, 255);// track-bar for max saturation//
+	//    createTrackbar("LowV", "Adjust", &Val_Low_,255);//track-bar for min value//
+	//    createTrackbar("HighV", "Adjust", &Val_high_, 255);// track - bar for max value//  
 
 }
 
@@ -99,6 +99,8 @@ void Tracker::run(int vidnum, bool show_windows) {
 			imshow("Detected_Object", adjusted_frame);//showing detected object//
 			// actual_Image = actual_Image + track_motion;//drawing continuous line in original video frames//
 		}
-		waitKey(1); // waitKey() is required for `imshow` to actually show something
+		// waitKey(1); // waitKey() is required for `imshow` to actually show something
+		if(waitKey(1) == 27) exit(0); //needed to add a way to quit
+		//TODO find a better method for quitting that does not result in "core dumped"
 	}
 }
