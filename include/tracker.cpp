@@ -28,12 +28,12 @@ Tracker::Tracker() {
 //TODO: can change parameters to detect other object. Wanted to keep defaults and specifics separate for now
 void Tracker::setObjectHSV(){
     if (!DETECT_OBJECT) {
-        Hue_Low_  = 80;//lower range of hue//
-        Hue_high_ = 91;//upper range of hue//
-        Sat_Low_  = 51;//lower range of saturation//
+        Hue_Low_  = 45;//lower range of hue//
+        Hue_high_ = 80;//upper range of hue//
+        Sat_Low_  = 91;//lower range of saturation//
         Sat_high_ = 255;//upper range of saturation//
         Val_Low_  = 83;//lower range of value//
-        Val_high_ = 166;//upper range of value//
+        Val_high_ = 176;//upper range of value//
    }
    
 	/*USE FOR OBJECT DETECTING INFORMATION*/

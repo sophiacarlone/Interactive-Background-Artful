@@ -39,6 +39,7 @@ const float WEIGHT_SEPARATION = 0.02;
 const float WEIGHT_COHESION   = 0.50;
 const float WEIGHT_ALIGNMENT  = 1.00;
 const float WEIGHT_ATTRACTION = 1.00;
+//TODO test out a 5th rule for border avoidance (consider having invisible border slightly off screen)
 //
 void main() {
     uint boidInd = gl_GlobalInvocationID.x;
