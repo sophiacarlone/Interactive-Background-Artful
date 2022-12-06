@@ -140,7 +140,7 @@ const uint32_t COMPUTE_LOCAL_WORKGROUP_SIZE = 32;
 
 // framerate cap so we don't get different simulation rates on different machines
 const size_t FPS_CAP = 60;
-const chrono::nanoseconds MIN_FRAME_INTERVAL_NANOSECONDS = chrono::seconds(1) / FPS_CAP;
+const chrono::nanoseconds MIN_FRAME_INTERVAL_NANOSECONDS = chrono::nanoseconds(chrono::seconds(1)) / FPS_CAP;
 
 // -----------------------------------------------------------------------------------------------------------
 
@@ -410,7 +410,8 @@ void Engine::drawFrame() {
 void Engine::waitAndUpdateFPSTimer() {
     steady_clock::duration elapsedSinceLastFrame = steady_clock::now() - lastFrameTime_;
     if (elapsedSinceLastFrame < MIN_FRAME_INTERVAL_NANOSECONDS) {
-        // @todo this might be a bad way to do this; `sleep_for` sleeps for "at least" that interval
+        // @todo this might be a bad way to do this; `sleep_for` sleeps for "at least" that interval.
+        // Also, this doesn't take into account the time it takes to do computations for the next frame.
         std::this_thread::sleep_for(MIN_FRAME_INTERVAL_NANOSECONDS - elapsedSinceLastFrame);
     }
     lastFrameTime_ = steady_clock::now();
