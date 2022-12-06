@@ -29,15 +29,19 @@
 #include <algorithm> // max_element
 #include <set>
 #include <limits>
-#include<fstream>
+#include <fstream>
 #include <array>
 #include <functional>
 #include <random>
+#include <chrono>
+#include <thread>
 
 namespace engine_impl {
 
 using std::vector, std::cout, std::runtime_error;
 using glm::vec2, glm::vec3;
+using std::chrono::steady_clock;
+namespace chrono = std::chrono;
 
 // vertex buffer gonna be AoS
 struct Vertex {
@@ -132,7 +136,11 @@ const vector<Vertex> ATTRACTOR_VERTS = {
 
 // @todo chosen arbitrarily; choose it properly and respect the device limits.
 // Make sure this matches the size specified in the shader.
-uint32_t COMPUTE_LOCAL_WORKGROUP_SIZE = 32;
+const uint32_t COMPUTE_LOCAL_WORKGROUP_SIZE = 32;
+
+// framerate cap so we don't get different simulation rates on different machines
+const size_t FPS_CAP = 60;
+const chrono::nanoseconds MIN_FRAME_INTERVAL_NANOSECONDS = chrono::seconds(1) / FPS_CAP;
 
 // -----------------------------------------------------------------------------------------------------------
 
@@ -163,7 +171,7 @@ struct SwapchainSupportDetails {
 
 class Engine {
 public:
-    Engine(size_t nBoids) : N_BOIDS_(nBoids) {}
+    Engine(size_t nBoids) : N_BOIDS_(nBoids), lastFrameTime_(steady_clock::now()) {}
     void run(std::function<void()> mainLoopCallback);
     void updateAttractor(vec2 newPos) { attractorPos_ = newPos; }
     void updateRepeller( vec2 newPos) { repellorPos_  = newPos; }
@@ -220,6 +228,8 @@ private:
     // world state (i.e. states of objects in the virtual world)
     vec2 attractorPos_; // the thing attracting the boids
     vec2 repellorPos_;  // the thing repelling  the boids
+    // FPS stuff
+    steady_clock::time_point lastFrameTime_; // @todo initialize
 
     // functions called by run()
     void initWindow();
@@ -274,6 +284,7 @@ private:
     void initBoidsBuffer();
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     AllocatedBuffer createBuffer(size_t allocSize, VkBufferUsageFlags, VmaAllocationCreateInfo);
+    void waitAndUpdateFPSTimer(); // blocks until it's time to draw the next frame
 };
 
 void Engine::run(std::function<void()> mainLoopCallback) {
@@ -396,6 +407,15 @@ void Engine::drawFrame() {
     vkQueuePresentKHR(presentQueue_, &pInfo);
 }
 
+void Engine::waitAndUpdateFPSTimer() {
+    steady_clock::duration elapsedSinceLastFrame = steady_clock::now() - lastFrameTime_;
+    if (elapsedSinceLastFrame < MIN_FRAME_INTERVAL_NANOSECONDS) {
+        // @todo this might be a bad way to do this; `sleep_for` sleeps for "at least" that interval
+        std::this_thread::sleep_for(MIN_FRAME_INTERVAL_NANOSECONDS - elapsedSinceLastFrame);
+    }
+    lastFrameTime_ = steady_clock::now();
+}
+
 void Engine::mainLoop(std::function<void()> callbackFunc) {
     while (!glfwWindowShouldClose(window_)) {
         glfwPollEvents();
@@ -403,6 +423,10 @@ void Engine::mainLoop(std::function<void()> callbackFunc) {
         //callbackFunc provides an interface (for whoever is using the engine) to update the world state
         callbackFunc();
 
+        // wait to draw the next frame
+        waitAndUpdateFPSTimer();
+
+        // draw the next frame
         drawFrame();
     }
 
@@ -1531,6 +1555,7 @@ AllocatedBuffer Engine::createBuffer(
 
 
 void Engine::initVulkan() {
+    cout << "alskjdf" << MIN_FRAME_INTERVAL_NANOSECONDS.count() << '\n'; // @debug
     createInstance(); cout << "created instance\n";
     // should be after instance, before physical device (can affect phys dev selection)
     createSurface();                cout << "created surface\n";
