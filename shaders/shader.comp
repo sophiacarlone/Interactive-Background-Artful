@@ -31,8 +31,8 @@ vec2 normalizeIfNotZero(vec2 v) {
     return divideIfNotZero(v, len);
 }
 
-const float COLLISION_AVOIDANCE_RADIUS = 0.15; // @todo make the radius scale with speed?
-const float SPEED_MAX = 0.5;
+const float COLLISION_AVOIDANCE_RADIUS = 0.1; // @todo make the radius scale with speed?
+const float SPEED_MAX = 1.0;
 const float SPEED_MIN = 0.1;
 const float DT = 0.01; // time step
 // weight factors; modify to increase or decrease priority of different factors
