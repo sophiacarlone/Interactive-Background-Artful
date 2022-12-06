@@ -41,7 +41,7 @@ const float WEIGHT_SEPARATION = 0.02;
 const float WEIGHT_COHESION   = 0.50;
 const float WEIGHT_ALIGNMENT  = 1.00;
 const float WEIGHT_ATTRACTION = 1.00;
-const float WEIGHT_REPULSION  = 0.10;
+const float WEIGHT_REPULSION  = 1.00;
 //TODO test out a 5th rule for border avoidance (consider having invisible border slightly off screen)
 //
 void main() {
@@ -90,7 +90,12 @@ void main() {
     // Compute acceleration due to repulsion from an object
     vec2 repulsorDisp = boid.xy - REPULSOR_POS;
     float repulsorDist = length(repulsorDisp);
-    vec2 accRepulsion = divideIfNotZero(repulsorDisp, repulsorDist * repulsorDist);
+    // vec2 accRepulsion = divideIfNotZero(repulsorDisp, repulsorDist * repulsorDist);
+    vec2 accRepulsion = exp(-repulsorDist) * repulsorDisp / repulsorDist;
+    // @todo Maybe we can make the boid sort of steer to the side to avoid it, instead of just stopping and
+    // turning around on the spot when approaching it head-on.
+    // @todo the repulsion should really be pretty small, and scale with how fast the repulsor is moving
+    // toward the boid.
 
     // Compute new boid values due to net acceleration
     vec2 netAcc =
