@@ -85,7 +85,8 @@ struct Boid {
 // alignas qualifiers are to ensure data is aligned the way the shader expects it to be (see `std140` in GLSL
 // or OpenGL spec).
 struct ComputePushConstants {
-    alignas(8) vec2 attractorPos;
+    alignas(4) vec2 attractorPos;
+    alignas(4) vec2 repellerPos;
     alignas(4) uint32_t nBoids;
 };
 
@@ -165,6 +166,7 @@ public:
     Engine(size_t nBoids) : N_BOIDS_(nBoids) {}
     void run(std::function<void()> mainLoopCallback);
     void updateAttractor(vec2 newPos) { attractorPos_ = newPos; }
+    void updateRepeller( vec2 newPos) { repellorPos_  = newPos; }
 
 private:
     GLFWwindow* window_;
@@ -217,6 +219,7 @@ private:
     const size_t N_BOIDS_; // so we know how big the boids buffer should be and how many instances to draw
     // world state (i.e. states of objects in the virtual world)
     vec2 attractorPos_; // the thing attracting the boids
+    vec2 repellorPos_;  // the thing repelling  the boids
 
     // functions called by run()
     void initWindow();
@@ -1379,7 +1382,7 @@ void Engine::recordComputeCmdBuf(VkCommandBuffer cbuf) {
     }
 
     vkCmdBindPipeline(cbuf, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_);
-    ComputePushConstants pc = { attractorPos_, static_cast<uint32_t>(N_BOIDS_) };
+    ComputePushConstants pc = { attractorPos_, repellorPos_, static_cast<uint32_t>(N_BOIDS_) };
     vkCmdPushConstants(
         cbuf, computePipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &pc
     );
@@ -1422,6 +1425,7 @@ void Engine::destroySyncObjects() {
 
 void Engine::initWorldState() {
     attractorPos_ = vec2(0.0);
+    repellorPos_  = vec2(0.0);
     initBoidsBuffer();
 }
 

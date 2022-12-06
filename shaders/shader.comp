@@ -14,6 +14,7 @@ layout(binding = 0, std140) buffer Boids {
 };
 layout(push_constant, std140) uniform PushConsts {
     vec2 ATTRACTOR_POS;
+    vec2 REPELLER_POS;
     uint N_BOIDS;
 };
 
@@ -39,6 +40,7 @@ const float WEIGHT_SEPARATION = 0.02;
 const float WEIGHT_COHESION   = 0.50;
 const float WEIGHT_ALIGNMENT  = 1.00;
 const float WEIGHT_ATTRACTION = 1.00;
+const float WEIGHT_REPULSION  = 0.10;
 //TODO test out a 5th rule for border avoidance (consider having invisible border slightly off screen)
 //
 void main() {
@@ -78,13 +80,19 @@ void main() {
     vec2 attractorDisp = ATTRACTOR_POS - boid.xy;
     // @todo Not sure why I decided to normalize, but it looks cool and reduces the magnitude of overshooting.
     vec2 accAttraction = normalizeIfNotZero(attractorDisp);
+    
+    // Compute acceleration due to repulsion from an object
+    vec2 repellerDisp = boid.xy - REPELLER_POS;
+    float repellerDist = length(repellerDisp);
+    vec2 accRepulsion = divideIfNotZero(repellerDisp, repellerDist * repellerDist);
 
     // Compute new boid values due to net acceleration
     vec2 netAcc =
         WEIGHT_COHESION   * accCohesion_accAlignment.xy + 
         WEIGHT_SEPARATION * accSeparation               + 
         WEIGHT_ALIGNMENT  * accCohesion_accAlignment.zw +
-        WEIGHT_ATTRACTION * accAttraction;
+        WEIGHT_ATTRACTION * accAttraction               +
+        WEIGHT_REPULSION  * accRepulsion                ;
     // @optimize under what conditions is this compiled to an `fma` instruction?
     boid.zw += DT*netAcc;
     // enforce speed limits
