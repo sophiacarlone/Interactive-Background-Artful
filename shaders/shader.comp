@@ -31,9 +31,10 @@ vec2 normalizeIfNotZero(vec2 v) {
     return divideIfNotZero(v, len);
 }
 
-const float COLLISION_AVOIDANCE_RADIUS = 0.1; // @todo make the radius scale with speed?
 const float SPEED_MAX = 1.0;
 const float SPEED_MIN = 0.1;
+const float COLLISION_AVOIDANCE_RADIUS_MAX = 0.20; // collision avoidance radius at max speed
+const float COLLISION_AVOIDANCE_RADIUS_MIN = 0.02; // collision avoidance radius at min speed
 const float DT = 0.01; // time step
 // weight factors; modify to increase or decrease priority of different factors
 const float WEIGHT_SEPARATION = 0.02;
@@ -59,6 +60,11 @@ void main() {
         // for the separation computation anyway, so there probably isn't much point.
         sumPos_sumVel += otherBoid;
 
+        // avoid nearby boids in a larger radius if moving faster
+        // @todo unnecessary division, this could be a compile-time constant
+        float avoidanceRadius = COLLISION_AVOIDANCE_RADIUS_MAX / SPEED_MAX * length(boid.zw);
+        avoidanceRadius = max(avoidanceRadius, COLLISION_AVOIDANCE_RADIUS_MIN);
+
         vec2 disp = boid.xy - otherBoid.xy;
         float dist = length(disp);
         // Accelerate away from the other boid (with acc proportional to 1/dist) iff all of:
@@ -68,7 +74,7 @@ void main() {
         accSeparation += mix(
             vec2(0.0),
             disp / (dist * dist),
-            bvec2(dist < COLLISION_AVOIDANCE_RADIUS && i != boidInd && dist != 0.0)
+            bvec2(dist < avoidanceRadius && i != boidInd && dist != 0.0)
         );
     }
     // Compute acceleration due to cohesion  (meanPos - ourPos)
