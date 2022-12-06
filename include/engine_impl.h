@@ -171,10 +171,12 @@ struct SwapchainSupportDetails {
 
 class Engine {
 public:
-    Engine(size_t nBoids) : N_BOIDS_(nBoids), lastFrameTime_(steady_clock::now()) {}
+    Engine(size_t nBoids)
+        : N_BOIDS_(nBoids), lastFrameTime_(steady_clock::now()), repulsorFollowsCursor_(false) {}
     void run(std::function<void()> mainLoopCallback);
     void updateAttractor(vec2 newPos) { attractorPos_ = newPos; }
     void updateRepulsor( vec2 newPos) { repulsorPos_  = newPos; }
+    void setRepulsorFollowsCursor(bool enabled) { repulsorFollowsCursor_ = enabled; }
 
 private:
     GLFWwindow* window_;
@@ -222,14 +224,16 @@ private:
     AllocatedBuffer boidPositionsBuffer_;
     VkDescriptorPool descriptorPool_;
     VkDescriptorSet descriptorSet_;
+    // simulation behavior
     // DON'T remove the `const` qualifier without considering the fact that the boids buffer doesn't
     // automatically get reallocated.
     const size_t N_BOIDS_; // so we know how big the boids buffer should be and how many instances to draw
+    bool repulsorFollowsCursor_;
     // world state (i.e. states of objects in the virtual world)
     vec2 attractorPos_; // the thing attracting the boids
     vec2 repulsorPos_;  // the thing repelling  the boids
     // FPS stuff
-    steady_clock::time_point lastFrameTime_; // @todo initialize
+    steady_clock::time_point lastFrameTime_;
 
     // functions called by run()
     void initWindow();
@@ -285,6 +289,7 @@ private:
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     AllocatedBuffer createBuffer(size_t allocSize, VkBufferUsageFlags, VmaAllocationCreateInfo);
     void waitAndUpdateFPSTimer(); // blocks until it's time to draw the next frame
+    vec2 getCursorPos(); // gets the cursor position in normalized coordinates
 };
 
 void Engine::run(std::function<void()> mainLoopCallback) {
@@ -417,6 +422,18 @@ void Engine::waitAndUpdateFPSTimer() {
     lastFrameTime_ = steady_clock::now();
 }
 
+vec2 Engine::getCursorPos() {
+    // get cursor position
+    double xpos;
+    double ypos;
+    glfwGetCursorPos(window_, &xpos, &ypos);
+    // map to [-1,1]
+    xpos = 2.0 * (xpos / (double)WIDTH)  - 1.0;
+    ypos = 2.0 * (ypos / (double)HEIGHT) - 1.0;
+    
+    return vec2( (float)xpos, (float)ypos );
+}
+
 void Engine::mainLoop(std::function<void()> callbackFunc) {
     while (!glfwWindowShouldClose(window_)) {
         glfwPollEvents();
@@ -426,6 +443,9 @@ void Engine::mainLoop(std::function<void()> callbackFunc) {
 
         // wait to draw the next frame
         waitAndUpdateFPSTimer();
+
+        // update repulsor
+        if (repulsorFollowsCursor_) updateRepulsor(getCursorPos());
 
         // draw the next frame
         drawFrame();
