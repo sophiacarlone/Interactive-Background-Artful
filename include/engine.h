@@ -16,6 +16,7 @@ public:
     void run(std::function<void()> mainLoopCallback = [](){}) { engine_.run(mainLoopCallback); }
     void updateAttractor(vec2 newPosition) { engine_.updateAttractor(newPosition); }
     void updateRepulsor( vec2 newPosition) { engine_.updateRepulsor( newPosition); }
+    void setRepulsorFollowsCursor(bool enabled) { engine_.setRepulsorFollowsCursor(enabled); }
 
 private:
     engine_impl::Engine engine_;

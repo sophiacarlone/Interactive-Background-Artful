@@ -10,6 +10,7 @@ int main() {
     float theta = 0.0;
 
     engine::Engine eng(N_BOIDS);
+    eng.setRepulsorFollowsCursor(true);
     eng.run([&]() {
         theta += 0.01;
         if (theta > 2*M_PI) theta -= 2*M_PI;
