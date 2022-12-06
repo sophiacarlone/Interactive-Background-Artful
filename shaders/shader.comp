@@ -14,7 +14,7 @@ layout(binding = 0, std140) buffer Boids {
 };
 layout(push_constant, std140) uniform PushConsts {
     vec2 ATTRACTOR_POS;
-    vec2 REPELLER_POS;
+    vec2 REPULSOR_POS;
     uint N_BOIDS;
 };
 
@@ -82,9 +82,9 @@ void main() {
     vec2 accAttraction = normalizeIfNotZero(attractorDisp);
     
     // Compute acceleration due to repulsion from an object
-    vec2 repellerDisp = boid.xy - REPELLER_POS;
-    float repellerDist = length(repellerDisp);
-    vec2 accRepulsion = divideIfNotZero(repellerDisp, repellerDist * repellerDist);
+    vec2 repulsorDisp = boid.xy - REPULSOR_POS;
+    float repulsorDist = length(repulsorDisp);
+    vec2 accRepulsion = divideIfNotZero(repulsorDisp, repulsorDist * repulsorDist);
 
     // Compute new boid values due to net acceleration
     vec2 netAcc =

@@ -15,7 +15,7 @@ public:
     Engine(size_t nBoids) : engine_(nBoids) {}
     void run(std::function<void()> mainLoopCallback = [](){}) { engine_.run(mainLoopCallback); }
     void updateAttractor(vec2 newPosition) { engine_.updateAttractor(newPosition); }
-    void updateRepeller( vec2 newPosition) { engine_.updateRepeller( newPosition); }
+    void updateRepulsor( vec2 newPosition) { engine_.updateRepulsor( newPosition); }
 
 private:
     engine_impl::Engine engine_;
