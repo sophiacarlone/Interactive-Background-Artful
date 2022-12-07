@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
     std::thread engine_thread([&engine, &tracker]() {
         engine.run([&engine, &tracker]() {
             Point2d pos = tracker.getPos();
-            engine.updateAttractor(vec2(pos.x, pos.y));
+            engine.updateRepulsor(vec2(pos.x, pos.y));
         });
     });
     // Note: keeping tracker in the main thread because it breaks when attempting to update its windows from
