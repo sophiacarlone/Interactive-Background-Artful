@@ -5,6 +5,14 @@
 // and pass in via... a specialization constant or something?)
 layout(local_size_x = 32) in;
 
+struct WeightFactors {
+    float separation;
+    float cohesion;
+    float alignment;
+    float attraction;
+    float repulsion;
+};
+
 // the boids buffer
 layout(binding = 0, std140) buffer Boids {
     // We're representing a `struct Boid { vec2 pos; vec2 vel; }` as a vec4, where
@@ -16,6 +24,7 @@ layout(push_constant, std140) uniform PushConsts {
     vec2 ATTRACTOR_POS;
     vec2 REPULSOR_POS;
     uint N_BOIDS;
+    WeightFactors WEIGHTS;
 };
 
 // helpers to avoid branching. Never actually benchmarked to see if this was better
@@ -36,13 +45,6 @@ const float SPEED_MIN = 0.1;
 const float COLLISION_AVOIDANCE_RADIUS_MAX = 0.20; // collision avoidance radius at max speed
 const float COLLISION_AVOIDANCE_RADIUS_MIN = 0.02; // collision avoidance radius at min speed
 const float DT = 0.01; // time step
-// weight factors; modify to increase or decrease priority of different factors
-const float WEIGHT_SEPARATION = 0.02;
-const float WEIGHT_COHESION   = 0.50;
-const float WEIGHT_ALIGNMENT  = 1.00;
-const float WEIGHT_ATTRACTION = 1.00;
-const float WEIGHT_REPULSION  = 1.00;
-//TODO test out a 5th rule for border avoidance (consider having invisible border slightly off screen)
 //
 void main() {
     uint boidInd = gl_GlobalInvocationID.x;
@@ -91,7 +93,7 @@ void main() {
     vec2 repulsorDisp = boid.xy - REPULSOR_POS;
     float repulsorDist = length(repulsorDisp);
     // vec2 accRepulsion = divideIfNotZero(repulsorDisp, repulsorDist * repulsorDist);
-    vec2 accRepulsion = exp(-repulsorDist) * repulsorDisp / repulsorDist;
+    vec2 accRepulsion = exp(-repulsorDist) * divideIfNotZero(repulsorDisp, repulsorDist);
     // @todo Maybe we can make the boid sort of steer to the side to avoid it, instead of just stopping and
     // turning around on the spot when approaching it head-on.
     // @todo the repulsion should really be pretty small, and scale with how fast the repulsor is moving
@@ -99,11 +101,11 @@ void main() {
 
     // Compute new boid values due to net acceleration
     vec2 netAcc =
-        WEIGHT_COHESION   * accCohesion_accAlignment.xy + 
-        WEIGHT_SEPARATION * accSeparation               + 
-        WEIGHT_ALIGNMENT  * accCohesion_accAlignment.zw +
-        WEIGHT_ATTRACTION * accAttraction               +
-        WEIGHT_REPULSION  * accRepulsion                ;
+        WEIGHTS.cohesion   * accCohesion_accAlignment.xy + 
+        WEIGHTS.separation * accSeparation               + 
+        WEIGHTS.alignment  * accCohesion_accAlignment.zw +
+        WEIGHTS.attraction * accAttraction               +
+        WEIGHTS.repulsion  * accRepulsion                ;
     // @optimize under what conditions is this compiled to an `fma` instruction?
     boid.zw += DT*netAcc;
     // enforce speed limits

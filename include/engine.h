@@ -12,7 +12,7 @@ using glm::vec2;
 
 class Engine {
 public:
-    Engine(size_t nBoids) : engine_(nBoids) {}
+    Engine(size_t maxNBoids, size_t initNBoids) : engine_(maxNBoids, initNBoids) {}
     void run(std::function<void()> mainLoopCallback = [](){}) { engine_.run(mainLoopCallback); }
     void updateAttractor(vec2 newPosition) { engine_.updateAttractor(newPosition); }
     void updateRepulsor( vec2 newPosition) { engine_.updateRepulsor( newPosition); }
