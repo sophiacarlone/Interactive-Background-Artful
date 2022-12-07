@@ -109,6 +109,7 @@ struct ComputePushConstants {
 struct GraphicsPushConstants {
     alignas(4) float boidSpeedMax;
     alignas(4) float boidSpeedMin;
+    alignas(4) bool  invertBrightness;
 };
 
 // CONSTANTS -------------------------------------------------------------------------------------------------
@@ -255,6 +256,7 @@ private:
     SimulationWeightFactors weightFactors_;
     float boidSpeedMax_;
     float boidSpeedMin_;
+    bool invertBrightness_;
     // world state (i.e. states of objects in the virtual world)
     vec2 attractorPos_; // the thing attracting the boids
     vec2 repulsorPos_;  // the thing repelling  the boids
@@ -532,16 +534,23 @@ void Engine::handleKeyPress(GLFWwindow* win, int key, int scancode, int action, 
         10'000 * ctrl
     });
 
-    bool modRepulsorWeight = false;
-    bool modNBoids         = false;
+    // track what's been modified
+    bool modRepulsorWeight   = false;
+    bool modNBoids           = false;
+    bool modInvertBrightness = false;
 
     auto modifyNBoids = [&](size_t n) { nBoids_ = std::min(n, MAX_N_BOIDS_); };
 
     switch (key) {
-        case GLFW_KEY_R:
+        case GLFW_KEY_R: // controls repulsion
             weightFactors_.repulsion += sign * 0.5;
             modRepulsorWeight = true;
             break;
+        case GLFW_KEY_I: // toggles brightness inversion
+            invertBrightness_ = !invertBrightness_;
+            modInvertBrightness = true;
+            break;
+
         case GLFW_KEY_1: modifyNBoids( 1 * nBoidsFactor); modNBoids = true; break;
         case GLFW_KEY_2: modifyNBoids( 2 * nBoidsFactor); modNBoids = true; break;
         case GLFW_KEY_3: modifyNBoids( 3 * nBoidsFactor); modNBoids = true; break;
@@ -556,8 +565,9 @@ void Engine::handleKeyPress(GLFWwindow* win, int key, int scancode, int action, 
     }
 
     #ifndef NDEBUG // @todo an actual display for this would be nice
-    if (modRepulsorWeight) cout << "repulsor strength: " << weightFactors_.repulsion << '\n';
-    if (modNBoids)         cout << "n boids: "           << nBoids_                  << '\n';
+    if (modRepulsorWeight)   cout << "repulsor strength: "    << weightFactors_.repulsion            << '\n';
+    if (modNBoids)           cout << "n boids: "              << nBoids_                             << '\n';
+    if (modInvertBrightness) cout << "brightness inversion: " << std::boolalpha << invertBrightness_ << '\n';
     #endif
 }
 
@@ -1504,6 +1514,7 @@ void Engine::recordGraphicsCmdBuf(VkCommandBuffer cbuf, uint32_t imageIndex) {
     GraphicsPushConstants pc{};
     pc.boidSpeedMax = boidSpeedMax_;
     pc.boidSpeedMin = boidSpeedMin_;
+    pc.invertBrightness = invertBrightness_;
     vkCmdPushConstants(
         cbuf, graphicsPipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GraphicsPushConstants), &pc
     );
@@ -1593,6 +1604,8 @@ void Engine::initWorldState() {
     //
     boidSpeedMax_ = 1.0;
     boidSpeedMin_ = 0.1;
+    //
+    invertBrightness_ = false;
 }
 
 void Engine::selectPhysicalDevice() {

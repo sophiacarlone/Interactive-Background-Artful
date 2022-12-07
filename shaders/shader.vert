@@ -28,6 +28,7 @@ layout(location = 0) out vec3 fragColor;
 layout(push_constant) uniform PushConsts {
     float BOID_SPEED_MAX;
     float BOID_SPEED_MIN;
+    bool  INVERT_BRIGHTNESS;
 };
 
 // radians
@@ -83,5 +84,9 @@ void main() {
 
     // linearly map boid velocity from [SPEED_MIN, SPEED_MAX] to [0,1]
     float normalizedVel = (length(boid.vel) - BOID_SPEED_MIN) / (BOID_SPEED_MAX - BOID_SPEED_MIN);
-    fragColor = hsv2rgb(degrees(angRad), 0.8, 1.0 - normalizedVel);
+    fragColor = hsv2rgb(
+        degrees(angRad),
+        0.8,
+        mix(normalizedVel, 1.0 - normalizedVel, INVERT_BRIGHTNESS)
+    );
 }
