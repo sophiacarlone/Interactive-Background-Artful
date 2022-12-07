@@ -247,10 +247,14 @@ private:
     steady_clock::time_point lastFrameTime_;
 
     // functions called by run()
-    void initWindow();
-    void initVulkan();
+    void init();
     void mainLoop(std::function<void()> callback);
     void cleanup();
+
+    // functions called by init()
+    void initGlfw();
+    void initVulkan();
+    void initWorldState();
 
     // physical device querying
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice);
@@ -278,7 +282,6 @@ private:
     void createDescriptorSet();
     void allocateCommandBuffers();
     void createSyncObjects();
-    void initWorldState();
 
     // helpers for cleanup
     void destroySwapchainImageViews();
@@ -301,13 +304,19 @@ private:
     AllocatedBuffer createBuffer(size_t allocSize, VkBufferUsageFlags, VmaAllocationCreateInfo);
     void waitAndUpdateFPSTimer(); // blocks until it's time to draw the next frame
     vec2 getCursorPos(); // gets the cursor position in normalized coordinates
+    void handleKeyPress(GLFWwindow*, int key, int scancode, int action, int modifiers);
 };
 
 void Engine::run(std::function<void()> mainLoopCallback) {
-    initWindow();
-    initVulkan();
+    init();
     mainLoop(mainLoopCallback);
     cleanup();
+}
+
+void Engine::init() {
+    initGlfw();
+    initVulkan();
+    initWorldState();
 }
 
 void Engine::initBoidsBuffer() {
@@ -466,12 +475,41 @@ void Engine::mainLoop(std::function<void()> callbackFunc) {
     vkDeviceWaitIdle(device_);
 }
 
-void Engine::initWindow() {
+void Engine::initGlfw() {
+    // initialize window
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // don't use OpenGL (glfw does by default)
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE); // @todo enable later
-
     window_ = glfwCreateWindow(WIDTH, HEIGHT, "TITLE", nullptr, nullptr);
+
+    // set up keypress handler
+    // Slightly convoluted method because glfwSetKeyCallback won't accept a function bound to an object.
+    // From https://stackoverflow.com/questions/7676971/pointing-to-a-function-that-is-a-class-member-glfw-setkeycallback
+    glfwSetWindowUserPointer(window_, this); // give the window a pointer to the engine
+    glfwSetKeyCallback(
+        window_,
+        [](GLFWwindow* win, int key, int scancode, int action, int mods) {
+            // use the pointer to call the engine's keypress handler
+            Engine* eng = static_cast<Engine*>(glfwGetWindowUserPointer(win));
+            eng->handleKeyPress(win, key, scancode, action, mods);
+        }
+    );
+}
+
+// glfwGetKey might be better than a callback for some use cases
+// @todo Maybe the contents of this function should be organized differently.
+void Engine::handleKeyPress(GLFWwindow* win, int key, int scancode, int action, int mods) {
+    if (!(action == GLFW_PRESS || action == GLFW_REPEAT)) return;
+
+    // add to weight by default; subtract if holding Shift
+    float sign = mods & GLFW_MOD_SHIFT ? -1.0 : 1.0;
+
+    switch (key) {
+        case GLFW_KEY_R:
+            weightFactors_.repulsion += sign * 0.1;
+            break;
+        default: break;
+    }
 }
 
 // @unused
@@ -1619,7 +1657,6 @@ void Engine::initVulkan() {
     createDescriptorSet();          cout << "created descriptor set\n";
     allocateCommandBuffers();       cout << "allocated command buffer\n";
     createSyncObjects();            cout << "created sync objects\n";
-    initWorldState();               cout << "initialized push constants\n";
 }
 
 void Engine::cleanup() {
