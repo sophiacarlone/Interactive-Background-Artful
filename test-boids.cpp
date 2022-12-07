@@ -4,12 +4,13 @@
 using std::vector;
 using engine::Boid, engine::vec2;
 
-const size_t N_BOIDS = 30;
+const size_t MAX_N_BOIDS  = 16'000;
+const size_t INIT_N_BOIDS = 30;
 
 int main() {
     float theta = 0.0;
 
-    engine::Engine eng(N_BOIDS);
+    engine::Engine eng(MAX_N_BOIDS, INIT_N_BOIDS);
     eng.setRepulsorFollowsCursor(true);
     eng.run([&]() {
         theta += 0.01;

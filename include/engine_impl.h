@@ -181,8 +181,12 @@ struct SwapchainSupportDetails {
 
 class Engine {
 public:
-    Engine(size_t nBoids)
-        : N_BOIDS_(nBoids), lastFrameTime_(steady_clock::now()), repulsorFollowsCursor_(false) {}
+    Engine(size_t maxNBoids, size_t initNBoids) :
+        MAX_N_BOIDS_(maxNBoids),
+        nBoids_(initNBoids),
+        lastFrameTime_(steady_clock::now()),
+        repulsorFollowsCursor_(false)
+        {}
     void run(std::function<void()> mainLoopCallback);
     void updateAttractor(vec2 newPos) { attractorPos_ = newPos; }
     void updateRepulsor( vec2 newPos) { repulsorPos_  = newPos; }
@@ -237,7 +241,8 @@ private:
     // simulation behavior
     // DON'T remove the `const` qualifier without considering the fact that the boids buffer doesn't
     // automatically get reallocated.
-    const size_t N_BOIDS_; // so we know how big the boids buffer should be and how many instances to draw
+    const size_t MAX_N_BOIDS_;
+    size_t nBoids_; // so we know how big the boids buffer should be and how many instances to draw
     bool repulsorFollowsCursor_;
     SimulationWeightFactors weightFactors_;
     // world state (i.e. states of objects in the virtual world)
@@ -326,7 +331,8 @@ void Engine::initBoidsBuffer() {
     std::uniform_real_distribution<float> rng(-1.0, 1.0);
 
     // Randomly distribute the boids. This looks significantly nicer than, e.g., distributing them linearly.
-    vector<Boid> boids(N_BOIDS_);
+    // We initialize MAX_N_BOIDS_, and the shaders will just use the first nBoids_ part of the buffer.
+    vector<Boid> boids(MAX_N_BOIDS_);
     for (Boid& boid : boids) {
         boid.pos = vec2(rng(generator), rng(generator));
         boid.vel = vec2(0.0);
@@ -501,18 +507,48 @@ void Engine::initGlfw() {
 void Engine::handleKeyPress(GLFWwindow* win, int key, int scancode, int action, int mods) {
     if (!(action == GLFW_PRESS || action == GLFW_REPEAT)) return;
 
+    bool shift = mods & GLFW_MOD_SHIFT;
+    bool alt   = mods & GLFW_MOD_ALT;
+    bool ctrl  = mods & GLFW_MOD_CONTROL;
+
     // add to weight by default; subtract if holding Shift
-    float sign = mods & GLFW_MOD_SHIFT ? -1.0 : 1.0;
+    float sign = shift ? -1.0 : 1.0;
+
+    // modifiers for number of boids: default = 10, shift = 100, alt = 1'000, ctrl = 10'000
+    size_t nBoidsFactor = std::max({
+            10,
+           100 * shift,
+         1'000 * alt,
+        10'000 * ctrl
+    });
+
+    bool modRepulsorWeight = false;
+    bool modNBoids         = false;
+
+    auto modifyNBoids = [&](size_t n) { nBoids_ = std::min(n, MAX_N_BOIDS_); };
 
     switch (key) {
         case GLFW_KEY_R:
             weightFactors_.repulsion += sign * 0.5;
-            #ifndef NDEBUG // @todo an actual display for this would be nice
-            cout << "repulsor strength: " << weightFactors_.repulsion << '\n';
-            #endif
+            modRepulsorWeight = true;
             break;
+        case GLFW_KEY_1: modifyNBoids( 1 * nBoidsFactor); modNBoids = true; break;
+        case GLFW_KEY_2: modifyNBoids( 2 * nBoidsFactor); modNBoids = true; break;
+        case GLFW_KEY_3: modifyNBoids( 3 * nBoidsFactor); modNBoids = true; break;
+        case GLFW_KEY_4: modifyNBoids( 4 * nBoidsFactor); modNBoids = true; break;
+        case GLFW_KEY_5: modifyNBoids( 5 * nBoidsFactor); modNBoids = true; break;
+        case GLFW_KEY_6: modifyNBoids( 6 * nBoidsFactor); modNBoids = true; break;
+        case GLFW_KEY_7: modifyNBoids( 7 * nBoidsFactor); modNBoids = true; break;
+        case GLFW_KEY_8: modifyNBoids( 8 * nBoidsFactor); modNBoids = true; break;
+        case GLFW_KEY_9: modifyNBoids( 9 * nBoidsFactor); modNBoids = true; break;
+        case GLFW_KEY_0: modifyNBoids(10 * nBoidsFactor); modNBoids = true; break;
         default: break;
     }
+
+    #ifndef NDEBUG // @todo an actual display for this would be nice
+    if (modRepulsorWeight) cout << "repulsor strength: " << weightFactors_.repulsion << '\n';
+    if (modNBoids)         cout << "n boids: "           << nBoids_                  << '\n';
+    #endif
 }
 
 // @unused
@@ -1343,12 +1379,12 @@ void Engine::createBoidsBuffer() {
 
     // verify that it doesn't require too much memory
     size_t max_n_boids = physicalDeviceProperties_.limits.maxStorageBufferRange / sizeof(Boid);
-    if (N_BOIDS_ > max_n_boids) {
+    if (MAX_N_BOIDS_ > max_n_boids) {
         throw runtime_error("exceeded max possible number of boids (" + std::to_string(max_n_boids) + ")");
     }
 
     boidPositionsBuffer_ =
-        createBuffer(N_BOIDS_*sizeof(Boid), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, allocInfo);
+        createBuffer(MAX_N_BOIDS_*sizeof(Boid), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, allocInfo);
 }
 
 void Engine::createDescriptorPool() {
@@ -1383,7 +1419,7 @@ void Engine::createDescriptorSet() {
     VkDescriptorBufferInfo bufInfo{}; // info for a descriptor describing a buffer
     bufInfo.buffer = boidPositionsBuffer_.buffer;
     bufInfo.offset = 0;
-    bufInfo.range = N_BOIDS_ * sizeof(Boid);
+    bufInfo.range = MAX_N_BOIDS_ * sizeof(Boid);
     //
     VkWriteDescriptorSet descWrite{};
     descWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1461,7 +1497,7 @@ void Engine::recordGraphicsCmdBuf(VkCommandBuffer cbuf, uint32_t imageIndex) {
     vkCmdBindDescriptorSets( // bind the boids uniform buffer descriptor
         cbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr
     );
-    vkCmdDraw(cbuf, static_cast<uint32_t>(BOID_VERTS.size()), N_BOIDS_, 0, 0);
+    vkCmdDraw(cbuf, static_cast<uint32_t>(BOID_VERTS.size()), nBoids_, 0, 0);
     vkCmdEndRenderPass(cbuf);
 
     if (vkEndCommandBuffer(cbuf) != VK_SUCCESS) {
@@ -1482,7 +1518,7 @@ void Engine::recordComputeCmdBuf(VkCommandBuffer cbuf) {
     ComputePushConstants pc{};
     pc.attractorPos = attractorPos_;
     pc.repulsorPos  = repulsorPos_;
-    pc.nBoids       = static_cast<uint32_t>(N_BOIDS_);
+    pc.nBoids       = static_cast<uint32_t>(nBoids_);
     pc.weights      = weightFactors_;
     vkCmdPushConstants(
         cbuf, computePipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &pc
@@ -1490,7 +1526,7 @@ void Engine::recordComputeCmdBuf(VkCommandBuffer cbuf) {
     vkCmdBindDescriptorSets( // bind the boids uniform buffer descriptor
         cbuf, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr
     );
-    uint32_t n_local_workgroups = ceil((float)N_BOIDS_ / (float)COMPUTE_LOCAL_WORKGROUP_SIZE);
+    uint32_t n_local_workgroups = ceil((float)nBoids_ / (float)COMPUTE_LOCAL_WORKGROUP_SIZE);
     vkCmdDispatch(cbuf, n_local_workgroups, 1, 1);
 
     if (vkEndCommandBuffer(cbuf) != VK_SUCCESS) {

@@ -13,7 +13,8 @@ using tracker::Point2d;
     const bool SHOW_TRACKER_WINDOWS = true;
 #endif
 
-const size_t N_BOIDS = 30;
+const size_t MAX_N_BOIDS  = 100'000;
+const size_t INIT_N_BOIDS = 30;
 
 int main(int argc, char** argv) {
     int vidnum;
@@ -22,7 +23,7 @@ int main(int argc, char** argv) {
 	//TODO: have openCV find best camera
    
     // initialize
-    engine::Engine engine(N_BOIDS);
+    engine::Engine engine(MAX_N_BOIDS, INIT_N_BOIDS);
     tracker::Tracker tracker;
     tracker.setObjectHSV();
 
