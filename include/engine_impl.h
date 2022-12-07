@@ -506,7 +506,10 @@ void Engine::handleKeyPress(GLFWwindow* win, int key, int scancode, int action, 
 
     switch (key) {
         case GLFW_KEY_R:
-            weightFactors_.repulsion += sign * 0.1;
+            weightFactors_.repulsion += sign * 0.5;
+            #ifndef NDEBUG // @todo an actual display for this would be nice
+            cout << "repulsor strength: " << weightFactors_.repulsion << '\n';
+            #endif
             break;
         default: break;
     }
