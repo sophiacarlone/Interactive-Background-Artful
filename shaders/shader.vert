@@ -4,11 +4,11 @@
 // `binding` is used for uniforms
 
 layout(location = 0) in vec2 vertPosition;
-layout(location = 1) in vec3 vertColor;
+layout(location = 1) in vec3 vertColor; // currently ignoring this
 
 struct Boid {
     vec2 pos;
-    vec2 vel; // only need this for orientation; assuming every boid is oriented in the direction it's moving
+    vec2 vel;
 };
 // We must ensure the buffer data satisfies std140 alignment requirements, to ensure the strides used by the
 // compiled shader aligns with the data.
@@ -26,8 +26,9 @@ layout(location = 0) out vec3 fragColor;
 // It's called a "uniform" because it's the same for every invocation in this call (as opposed to, e.g.,
 // vertPosition, vertColor, and fragColor, which have a different value for every invocation)
 layout(push_constant) uniform PushConsts {
-    mat4 posTransform;
-} pushConsts;
+    float BOID_SPEED_MAX;
+    float BOID_SPEED_MIN;
+};
 
 // radians
 vec2 rotate(float ang, vec2 v) {
@@ -69,5 +70,9 @@ void main() {
     p += boid.pos;
 
     gl_Position = vec4(p, 0.0f, 1.0f);
-    fragColor = vertColor;
+
+    // linearly map boid velocity from [SPEED_MIN, SPEED_MAX] to [0,1]
+    float normalizedVel = (length(boid.vel) - BOID_SPEED_MIN) / (BOID_SPEED_MAX - BOID_SPEED_MIN);
+    // color the boid a shade of gray that scales with its velocity
+    fragColor = normalizedVel * vec3(1.0);
 }

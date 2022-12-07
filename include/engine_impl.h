@@ -97,11 +97,18 @@ struct SimulationWeightFactors {
 // alignas qualifiers are to ensure data is aligned the way the shader expects it to be (see `std140` in GLSL
 // or OpenGL spec).
 // Make sure this doesn't exceed the allowed push constant size.
+// @todo I think these can be packed more efficiently
 struct ComputePushConstants {
-    alignas( 4) vec2 attractorPos;
-    alignas( 4) vec2 repulsorPos;
+    alignas( 8) vec2 attractorPos;
+    alignas( 8) vec2 repulsorPos;
     alignas( 4) uint32_t nBoids;
+    alignas( 4) float boidSpeedMax;
+    alignas( 4) float boidSpeedMin;
     alignas(32) SimulationWeightFactors weights;
+};
+struct GraphicsPushConstants {
+    alignas(4) float boidSpeedMax;
+    alignas(4) float boidSpeedMin;
 };
 
 // CONSTANTS -------------------------------------------------------------------------------------------------
@@ -241,10 +248,13 @@ private:
     // simulation behavior
     // DON'T remove the `const` qualifier without considering the fact that the boids buffer doesn't
     // automatically get reallocated.
+    // @todo put these together in a struct SimulationParameters or something
     const size_t MAX_N_BOIDS_;
     size_t nBoids_; // so we know how big the boids buffer should be and how many instances to draw
     bool repulsorFollowsCursor_;
     SimulationWeightFactors weightFactors_;
+    float boidSpeedMax_;
+    float boidSpeedMin_;
     // world state (i.e. states of objects in the virtual world)
     vec2 attractorPos_; // the thing attracting the boids
     vec2 repulsorPos_;  // the thing repelling  the boids
@@ -1201,9 +1211,9 @@ void Engine::createGraphicsPipeline() {
     // resizing window
 
     // push constants
-    VkPushConstantRange pcRange;
+    VkPushConstantRange pcRange{};
     pcRange.offset = 0;
-    pcRange.size = sizeof(glm::mat4);
+    pcRange.size = sizeof(GraphicsPushConstants);
     pcRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT; // only accessed by vertex shader
 
     // pipeline layout (something something descriptors, uniforms, push constants)
@@ -1490,9 +1500,12 @@ void Engine::recordGraphicsCmdBuf(VkCommandBuffer cbuf, uint32_t imageIndex) {
     VkBuffer vertexBuffers[] = {boidVertBuffer_.buffer};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cbuf, 0, 1, vertexBuffers, offsets);
-    glm::mat4 posTransform = glm::translate(glm::identity<glm::mat4>(), vec3(attractorPos_, 0.0));
+    // @todo use a function `fillGraphicsPushConstants` or something to make this step more manageable
+    GraphicsPushConstants pc{};
+    pc.boidSpeedMax = boidSpeedMax_;
+    pc.boidSpeedMin = boidSpeedMin_;
     vkCmdPushConstants(
-        cbuf, graphicsPipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(posTransform), &posTransform
+        cbuf, graphicsPipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GraphicsPushConstants), &pc
     );
     vkCmdBindDescriptorSets( // bind the boids uniform buffer descriptor
         cbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr
@@ -1515,11 +1528,16 @@ void Engine::recordComputeCmdBuf(VkCommandBuffer cbuf) {
     }
 
     vkCmdBindPipeline(cbuf, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_);
+    // @todo we should store these in a more convenient format in Engine so that we don't need to copy every
+    // individual value over like this, especially since it changes every time we add or remove a value. Maybe
+    // have a function `updateComputePushConstants` that returns the filled structure.
     ComputePushConstants pc{};
     pc.attractorPos = attractorPos_;
     pc.repulsorPos  = repulsorPos_;
     pc.nBoids       = static_cast<uint32_t>(nBoids_);
     pc.weights      = weightFactors_;
+    pc.boidSpeedMax = boidSpeedMax_;
+    pc.boidSpeedMin = boidSpeedMin_;
     vkCmdPushConstants(
         cbuf, computePipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &pc
     );
@@ -1565,12 +1583,16 @@ void Engine::initWorldState() {
     repulsorPos_  = vec2(0.0);
     initBoidsBuffer();
 
+    // simulation parameters
     weightFactors_ = SimulationWeightFactors{};
     weightFactors_.separation = 0.02;
     weightFactors_.cohesion   = 0.50;
     weightFactors_.alignment  = 1.00;
     weightFactors_.attraction = 1.00;
     weightFactors_.repulsion  = 1.00;
+    //
+    boidSpeedMax_ = 1.0;
+    boidSpeedMin_ = 0.1;
 }
 
 void Engine::selectPhysicalDevice() {
