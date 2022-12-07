@@ -6,6 +6,8 @@ Two main parts, the Graphics Engine and the Object Detection.
 
 Incorporates OpenCV
 
+Graphics demo: https://www.youtube.com/watch?v=viIw4Lahlqw
+
 ## Building
 
 The following will build all targets.
