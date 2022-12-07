@@ -24,6 +24,8 @@ layout(push_constant, std140) uniform PushConsts {
     vec2 ATTRACTOR_POS;
     vec2 REPULSOR_POS;
     uint N_BOIDS;
+    float SPEED_MAX;
+    float SPEED_MIN;
     WeightFactors WEIGHTS;
 };
 
@@ -40,8 +42,8 @@ vec2 normalizeIfNotZero(vec2 v) {
     return divideIfNotZero(v, len);
 }
 
-const float SPEED_MAX = 1.0;
-const float SPEED_MIN = 0.1;
+// const float SPEED_MAX = 1.0;
+// const float SPEED_MIN = 0.1;
 const float COLLISION_AVOIDANCE_RADIUS_MAX = 0.20; // collision avoidance radius at max speed
 const float COLLISION_AVOIDANCE_RADIUS_MIN = 0.02; // collision avoidance radius at min speed
 const float DT = 0.01; // time step
