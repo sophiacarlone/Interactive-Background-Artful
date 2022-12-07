@@ -85,13 +85,23 @@ struct Boid {
     alignas(8) vec2 vel;
 };
 
+struct SimulationWeightFactors {
+    alignas(4) float separation;
+    alignas(4) float cohesion;
+    alignas(4) float alignment;
+    alignas(4) float attraction;
+    alignas(4) float repulsion;
+};
+
 // Make sure this matches the definition in the shader.
 // alignas qualifiers are to ensure data is aligned the way the shader expects it to be (see `std140` in GLSL
 // or OpenGL spec).
+// Make sure this doesn't exceed the allowed push constant size.
 struct ComputePushConstants {
-    alignas(4) vec2 attractorPos;
-    alignas(4) vec2 repulsorPos;
-    alignas(4) uint32_t nBoids;
+    alignas( 4) vec2 attractorPos;
+    alignas( 4) vec2 repulsorPos;
+    alignas( 4) uint32_t nBoids;
+    alignas(32) SimulationWeightFactors weights;
 };
 
 // CONSTANTS -------------------------------------------------------------------------------------------------
@@ -229,6 +239,7 @@ private:
     // automatically get reallocated.
     const size_t N_BOIDS_; // so we know how big the boids buffer should be and how many instances to draw
     bool repulsorFollowsCursor_;
+    SimulationWeightFactors weightFactors_;
     // world state (i.e. states of objects in the virtual world)
     vec2 attractorPos_; // the thing attracting the boids
     vec2 repulsorPos_;  // the thing repelling  the boids
@@ -1427,7 +1438,11 @@ void Engine::recordComputeCmdBuf(VkCommandBuffer cbuf) {
     }
 
     vkCmdBindPipeline(cbuf, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_);
-    ComputePushConstants pc = { attractorPos_, repulsorPos_, static_cast<uint32_t>(N_BOIDS_) };
+    ComputePushConstants pc{};
+    pc.attractorPos = attractorPos_;
+    pc.repulsorPos  = repulsorPos_;
+    pc.nBoids       = static_cast<uint32_t>(N_BOIDS_);
+    pc.weights      = weightFactors_;
     vkCmdPushConstants(
         cbuf, computePipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &pc
     );
@@ -1472,6 +1487,13 @@ void Engine::initWorldState() {
     attractorPos_ = vec2(0.0);
     repulsorPos_  = vec2(0.0);
     initBoidsBuffer();
+
+    weightFactors_ = SimulationWeightFactors{};
+    weightFactors_.separation = 0.02;
+    weightFactors_.cohesion   = 0.50;
+    weightFactors_.alignment  = 1.00;
+    weightFactors_.attraction = 1.00;
+    weightFactors_.repulsion  = 1.00;
 }
 
 void Engine::selectPhysicalDevice() {
