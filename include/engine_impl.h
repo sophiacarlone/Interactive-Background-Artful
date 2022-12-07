@@ -543,7 +543,7 @@ void Engine::handleKeyPress(GLFWwindow* win, int key, int scancode, int action, 
 
     switch (key) {
         case GLFW_KEY_R: // controls repulsion
-            weightFactors_.repulsion += sign * 0.5;
+            weightFactors_.repulsion += sign * 1.0;
             modRepulsorWeight = true;
             break;
         case GLFW_KEY_I: // toggles brightness inversion
