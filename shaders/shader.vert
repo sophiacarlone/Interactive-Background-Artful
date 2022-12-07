@@ -4,7 +4,7 @@
 // `binding` is used for uniforms
 
 layout(location = 0) in vec2 vertPosition;
-layout(location = 1) in vec3 vertColor; // currently ignoring this
+layout(location = 1) in vec3 vertColor; // this is currently ignored
 
 struct Boid {
     vec2 pos;
@@ -57,6 +57,15 @@ float angle(vec2 v) {
     return atan(v.y, v.x); // maybe be suspicious of how this behaves when x or y is 0
 }
 
+// expects h in [0,360], s and v each in [0,1]
+// reference: https://web.archive.org/web/20221207073025/https://en.wikipedia.org/wiki/HSL_and_HSV
+vec3 hsv2rgb(float h, float s, float v) {
+    const vec3 n = vec3(5.0, 3.0, 1.0);
+    // h *= 360.0; // convert from [0,1] to degrees
+    vec3 k = mod((n + h / 60.0), 6.0);
+    return v - v * s * max(vec3(0.0), min(min(k, 4.0 - k), vec3(1.0)));
+}
+
 void main() {
     // vec3 pos = pushConsts.posTransform * vec3(vertPosition, 1.0f);
     // gl_Position = vec4(pos.xy, 0.0f, 1.0f);
@@ -66,13 +75,13 @@ void main() {
 
     // Set the orientation, then the position.
     // The order in which we do the transformations matters.
-    vec2 p = rotate(angle(boid.vel), vertPosition);
+    float angRad = angle(boid.vel);
+    vec2 p = rotate(angRad, vertPosition);
     p += boid.pos;
 
     gl_Position = vec4(p, 0.0f, 1.0f);
 
     // linearly map boid velocity from [SPEED_MIN, SPEED_MAX] to [0,1]
     float normalizedVel = (length(boid.vel) - BOID_SPEED_MIN) / (BOID_SPEED_MAX - BOID_SPEED_MIN);
-    // color the boid a shade of gray that scales with its velocity
-    fragColor = normalizedVel * vec3(1.0);
+    fragColor = hsv2rgb(degrees(angRad), 0.8, 1.0 - normalizedVel);
 }
