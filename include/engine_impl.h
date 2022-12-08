@@ -379,7 +379,18 @@ void Engine::drawFrame() {
     //         Doesn't automatically become unsignalled; if we want it reset, must do so manually
     
     // wait for GPU operations from the previous frame to complete
-    vkWaitForFences(device_, 1, &inFlightFence_, VK_TRUE, UINT64_MAX);
+    {
+        // @todo the spec doesn't actually say that UINT64_MAX will cause it to wait indefinitely... but if
+        // the device isn't ready by that time, then something's probably wrong and we should throw an error
+        // anyway.
+        VkResult result = vkWaitForFences(device_, 1, &inFlightFence_, VK_TRUE, UINT64_MAX);
+        if (result != VK_SUCCESS) {
+            throw runtime_error(
+                "failed to wait for fences" +
+                std::string((result == VK_ERROR_DEVICE_LOST) ? ": lost device (timed out?)" : "")
+            );
+        }
+    }
     vkResetFences(device_, 1, &inFlightFence_); // fences don't auto-reset
 
     // get an image from the swapchain
