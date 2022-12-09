@@ -4,7 +4,7 @@
 using std::vector;
 using engine::Boid, engine::vec2;
 
-const size_t MAX_N_BOIDS  = 16'000;
+const size_t MAX_N_BOIDS  = 100'000;
 const size_t INIT_N_BOIDS = 30;
 
 int main() {
