@@ -192,6 +192,7 @@ public:
     Engine(size_t maxNBoids, size_t initNBoids) :
         MAX_N_BOIDS_(maxNBoids),
         nBoids_(initNBoids),
+        nextNBoids_(initNBoids),
         lastFrameTime_(steady_clock::now()),
         repulsorFollowsCursor_(false)
         {}
@@ -250,8 +251,9 @@ private:
     // DON'T remove the `const` qualifier without considering the fact that the boids buffer doesn't
     // automatically get reallocated.
     // @todo put these together in a struct SimulationParameters or something
-    const size_t MAX_N_BOIDS_;
-    size_t nBoids_; // so we know how big the boids buffer should be and how many instances to draw
+    const size_t MAX_N_BOIDS_; // so we know how big to make the boids buffer
+    size_t nBoids_; // so we know how many instances to draw and compute workgroups to dispatch
+    size_t nextNBoids_; // the number of boids to use next frame
     bool repulsorFollowsCursor_;
     SimulationWeightFactors weightFactors_;
     float boidSpeedMax_;
@@ -493,8 +495,9 @@ void Engine::mainLoop(std::function<void()> callbackFunc) {
         // wait to draw the next frame
         waitAndUpdateFPSTimer();
 
-        // update repulsor
-        if (repulsorFollowsCursor_) updateRepulsor(getCursorPos());
+        // update world state
+        if (repulsorFollowsCursor_) updateRepulsor(getCursorPos()); // update repulsor
+        nBoids_ = nextNBoids_;
 
         // draw the next frame
         drawFrame();
@@ -550,7 +553,12 @@ void Engine::handleKeyPress(GLFWwindow* win, int key, int scancode, int action, 
     bool modNBoids           = false;
     bool modInvertBrightness = false;
 
-    auto modifyNBoids = [&](size_t n) { nBoids_ = std::min(n, MAX_N_BOIDS_); };
+    // We update nextNBoids_ instead of nBoids_, because this is a callback function and we don't want a race
+    // condition where we might update nBoids_ between multiple reads of it (e.g. in drawFrame()) that expect
+    // to get the same value.
+    // @todo we should probably take the same race-condition-avoidance approach with the over member variables
+    // updated by this function.
+    auto modifyNBoids = [&](size_t n) { nextNBoids_ = std::min(n, MAX_N_BOIDS_); };
 
     switch (key) {
         case GLFW_KEY_R: // controls repulsion
@@ -577,7 +585,7 @@ void Engine::handleKeyPress(GLFWwindow* win, int key, int scancode, int action, 
 
     #ifndef NDEBUG // @todo an actual display for this would be nice
     if (modRepulsorWeight)   cout << "repulsor strength: "    << weightFactors_.repulsion            << '\n';
-    if (modNBoids)           cout << "n boids: "              << nBoids_                             << '\n';
+    if (modNBoids)           cout << "n boids: "              << nBoids_ << " -> " << nextNBoids_    << '\n';
     if (modInvertBrightness) cout << "brightness inversion: " << std::boolalpha << invertBrightness_ << '\n';
     #endif
 }
