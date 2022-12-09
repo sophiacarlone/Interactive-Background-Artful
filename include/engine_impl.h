@@ -104,12 +104,12 @@ struct ComputePushConstants {
     alignas( 4) uint32_t nBoids;
     alignas( 4) float boidSpeedMax;
     alignas( 4) float boidSpeedMin;
-    alignas(32) SimulationWeightFactors weights;
+    alignas(16) SimulationWeightFactors weights;
 };
 struct GraphicsPushConstants {
     alignas(4) float boidSpeedMax;
     alignas(4) float boidSpeedMin;
-    alignas(4) bool  invertBrightness;
+    alignas(4) bool  invertBrightness; // @todo why did I align bool to 4 bytes? Does GLSL see it as a uint?
 };
 
 // CONSTANTS -------------------------------------------------------------------------------------------------
