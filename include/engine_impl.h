@@ -466,9 +466,6 @@ void Engine::drawFrame() {
     );
 
     // record command buffers
-    // @todo I'm not convinced it's legal to reset a command buffer from the initial state; i.e., if the last
-    // operation on it was its allocation or a reset (see section 6.1 Command Buffer Lifecycle in the Vulkan
-    // 1.3.234 spec); so this might cause undefined behavior on the first iteration of this loop
     vkResetCommandBuffer(graphicsCmdBuf_, 0);
     recordGraphicsCmdBuf(graphicsCmdBuf_, imageInd);
     //
