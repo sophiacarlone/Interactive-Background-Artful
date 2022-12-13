@@ -355,6 +355,7 @@ void Engine::initBoidsBuffer() {
     // create staging buffer
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    // since we're promising sequential writes only, we should only use memcpy to write to it!
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
     // HOST_COHERENT so that we don't need to explicitly flush writes
     allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
@@ -1476,13 +1477,10 @@ void Engine::createVertexBuffers() {
 
 void Engine::createBoidsBuffer() {
     VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    // since we're promising sequential writes only, we should only use memcpy to write to it!
-    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-    // @todo use a staging buffer for memory transfer instead of making this one host visible
-    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE; // prefer device-local for performance
 
     // verify that it doesn't require too much memory
+    // @todo after getting the buffer, we should do this check using the limits of that specific buffer
     size_t max_n_boids = physicalDeviceProperties_.limits.maxStorageBufferRange / sizeof(Boid);
     if (MAX_N_BOIDS_ > max_n_boids) {
         throw runtime_error("exceeded max possible number of boids (" + std::to_string(max_n_boids) + ")");
