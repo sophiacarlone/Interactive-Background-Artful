@@ -352,11 +352,74 @@ void Engine::initBoidsBuffer() {
         boid.vel = vec2(0.0);
     }
 
+    // create staging buffer
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+    // HOST_COHERENT so that we don't need to explicitly flush writes
+    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    //
+    AllocatedBuffer stagingBuf = createBuffer(
+        sizeof(Boid) * MAX_N_BOIDS_,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        allocInfo
+    );
+    
+    // copy boids to the staging buffer
     void* data;
-    vmaMapMemory(bufferAllocator_, boidPositionsBuffer_.allocation, &data);
+    vmaMapMemory(bufferAllocator_, stagingBuf.allocation, &data);
     memcpy(data, boids.data(), boids.size() * sizeof(Boid));
-    vmaUnmapMemory(bufferAllocator_, boidPositionsBuffer_.allocation);
+    vmaUnmapMemory(bufferAllocator_, stagingBuf.allocation);
     // no need to flush the write, as long as the buffer has VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+
+    // Record cmd buf for the transfer operation from staging buf to actual boids buf.
+    // We can use the compute cmd buf because compute and graphics queues support transfer operations.
+    VkCommandBufferBeginInfo beginInfo{};
+    // the cmd buf will be reset and re-recorded after this submission
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(computeCmdBuf_, &beginInfo) != VK_SUCCESS) {
+        throw runtime_error("failed to begin compute cmd buf recording for boids staging");
+    }
+    // record copy command
+    VkBufferCopy copyInfo{};
+    copyInfo.srcOffset = 0;
+    copyInfo.dstOffset = 0;
+    copyInfo.size = sizeof(Boid) * MAX_N_BOIDS_;
+    vkCmdCopyBuffer(computeCmdBuf_, stagingBuf.buffer, boidPositionsBuffer_.buffer, 1, &copyInfo);
+    if (vkEndCommandBuffer(computeCmdBuf_) != VK_SUCCESS) {
+        throw runtime_error("failed to end compute cmd buf recording for boids staging");
+    }
+
+    // create a fence so that we can wait for the copy to complete
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence transferCompletedFence;
+    if (vkCreateFence(device_, &fenceInfo, nullptr, &transferCompletedFence) != VK_SUCCESS) {
+        throw runtime_error("failed to create fence for boids staging");
+    }
+
+    // perform the copy
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &computeCmdBuf_;
+    //
+    if (vkQueueSubmit(computeQueue_, 1, &submitInfo, transferCompletedFence) != VK_SUCCESS) {
+        throw runtime_error("failed to submit cmd buf for boids staging");
+    }
+
+    // wait for completion
+    if (vkWaitForFences(device_, 1, &transferCompletedFence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+        throw runtime_error("failed to wait for boids staging to complete");
+    }
+
+    // clean up
+    if (vkResetCommandBuffer(computeCmdBuf_, 0) != VK_SUCCESS) {
+        throw runtime_error("failed to reset command buffer after staging boids");
+    }
+    vkDestroyFence(device_, transferCompletedFence, nullptr);
+    vmaDestroyBuffer(bufferAllocator_, stagingBuf.buffer, stagingBuf.allocation);
 }
 
 void Engine::drawFrame() {
@@ -402,6 +465,9 @@ void Engine::drawFrame() {
     );
 
     // record command buffers
+    // @todo I'm not convinced it's legal to reset a command buffer from the initial state; i.e., if the last
+    // operation on it was its allocation or a reset (see section 6.1 Command Buffer Lifecycle in the Vulkan
+    // 1.3.234 spec); so this might cause undefined behavior on the first iteration of this loop
     vkResetCommandBuffer(graphicsCmdBuf_, 0);
     recordGraphicsCmdBuf(graphicsCmdBuf_, imageInd);
     //
@@ -1422,8 +1488,12 @@ void Engine::createBoidsBuffer() {
         throw runtime_error("exceeded max possible number of boids (" + std::to_string(max_n_boids) + ")");
     }
 
-    boidPositionsBuffer_ =
-        createBuffer(MAX_N_BOIDS_*sizeof(Boid), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, allocInfo);
+    // TRANSFER_DST_BIT because because we use a staging buffer to initialize it
+    boidPositionsBuffer_ = createBuffer(
+        MAX_N_BOIDS_*sizeof(Boid),
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        allocInfo
+    );
 }
 
 void Engine::createDescriptorPool() {
