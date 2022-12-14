@@ -152,9 +152,8 @@ const vector<Vertex> ATTRACTOR_VERTS = {
     { {-0.025f, -0.043f}, {0.0f, 0.0f, 1.0f} }
 };
 
-// @todo chosen arbitrarily; choose it properly and respect the device limits.
-// Make sure this matches the size specified in the shader.
-const uint32_t COMPUTE_LOCAL_WORKGROUP_SIZE = 32;
+// Make sure this matches the ID specified in the shader.
+const uint32_t COMPUTE_LOCAL_WORKGROUP_SIZE_SPEC_CONSTANT_ID = 0;
 
 // framerate cap so we don't get different simulation rates on different machines
 const size_t FPS_CAP = 60;
@@ -227,6 +226,7 @@ private:
     // compute pipeline stuff
     VkPipelineLayout computePipelineLayout_;
     VkPipeline computePipeline_;
+    uint32_t computeLocalWorkgroupSize_;
     // command stuff
     VkCommandPool graphicsCmdPool_; // a command pool manages memory for command buffers
     VkCommandBuffer graphicsCmdBuf_; // a command buffer containing commands is submitted to a device queue
@@ -1118,7 +1118,20 @@ void Engine::createComputePipeline() {
     stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     stageInfo.module = compShaderModule;
     stageInfo.pName = "main";
-
+    //
+    // specialization constants
+    computeLocalWorkgroupSize_ = physicalDeviceProperties_.limits.maxComputeWorkGroupSize[0]; // [0] = x dim
+    VkSpecializationMapEntry mapEntry{};
+    mapEntry.constantID = COMPUTE_LOCAL_WORKGROUP_SIZE_SPEC_CONSTANT_ID;
+    mapEntry.offset = 0;
+    mapEntry.size = sizeof(computeLocalWorkgroupSize_);
+    VkSpecializationInfo specInfo{};
+    specInfo.mapEntryCount = 1;
+    specInfo.pMapEntries = &mapEntry;
+    specInfo.dataSize = sizeof(computeLocalWorkgroupSize_);
+    specInfo.pData = &computeLocalWorkgroupSize_;
+    stageInfo.pSpecializationInfo = &specInfo;
+    
     VkPipelineCreateFlags pipelineFlags{}; // didn't see any flags I wanted to set, leaving empty
 
     // push constant info
@@ -1173,8 +1186,8 @@ void Engine::createGraphicsPipeline() {
     // specify entrypoint; we could have multiple potential entrypoints in the shader, so we pick one here
     vertShaderStageInfo.pName = "main";
     // note: ...Info.pSPecializationInfo can be used to specify constants used in the shader at pipeline
-    // creation time, which could be more efficient than pushing them during the render loop.
-    // @todo we should probably use this to specify the local workgroup size in the compute shader.
+    // creation time, which could be more efficient than pushing them during the render loop if they are
+    // constant over program's lifetime.
 
     VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
     fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -1639,7 +1652,7 @@ void Engine::recordComputeCmdBuf(VkCommandBuffer cbuf) {
     vkCmdBindDescriptorSets( // bind the boids uniform buffer descriptor
         cbuf, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr
     );
-    uint32_t n_local_workgroups = ceil((float)nBoids_ / (float)COMPUTE_LOCAL_WORKGROUP_SIZE);
+    uint32_t n_local_workgroups = ceil((float)nBoids_ / (float)computeLocalWorkgroupSize_);
     vkCmdDispatch(cbuf, n_local_workgroups, 1, 1);
 
     if (vkEndCommandBuffer(cbuf) != VK_SUCCESS) {

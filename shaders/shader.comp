@@ -1,9 +1,8 @@
 #version 450
 
 // There's no `location` for `in`; it's just used to specify the local workgroup dimensions.
-// @todo local workgroup size chosen arbitrarily; choose it properly (maybe programmatically determine on host
-// and pass in via... a specialization constant or something?)
-layout(local_size_x = 32) in;
+// Local workgroup size set via specialization constant.
+layout(local_size_x_id = 0) in;
 
 struct WeightFactors {
     float separation;
